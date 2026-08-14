@@ -1,3 +1,3 @@
 public enum TerminalScaffold {
-    public static let policyImplemented = false
+    public static let policyImplemented = true
 }

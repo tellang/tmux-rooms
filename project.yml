@@ -17,6 +17,7 @@ targets:
     sources:
       - Sources/Core
       - Sources/Terminal
+      - Sources/Supervisor
     settings:
       base:
         PRODUCT_NAME: TmuxRoomsCore
@@ -26,6 +27,8 @@ targets:
     platform: macOS
     sources:
       - Sources/Launcher
+    dependencies:
+      - target: TmuxRoomsCore
     settings:
       base:
         PRODUCT_NAME: tmuxrooms-launch

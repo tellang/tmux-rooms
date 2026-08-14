@@ -1,14 +1,23 @@
 import Foundation
+import TmuxRoomsCore
 
 let usage = """
-Usage: tmuxrooms-launch [--help]
+Usage: tmuxrooms-launch --supervise <nonce>
 
-Tmux Rooms launcher placeholder. Core lifecycle actions are not implemented in T2.
+Internal bundled helper for app-owned managed terminal sessions.
 """
 
-if CommandLine.arguments.count == 1 || CommandLine.arguments.dropFirst().contains("--help") {
+let arguments = Array(CommandLine.arguments.dropFirst())
+if arguments.isEmpty || arguments.contains("--help") {
     print(usage)
 } else {
-    FileHandle.standardError.write(Data("tmuxrooms-launch: no actions are implemented in T2\n".utf8))
-    exit(64)
+    do {
+        let nonce = try ManagedSupervisorCLI.parse(arguments: arguments)
+        let journal = ManagedClientJournal()
+        let configuration = try journal.readConfiguration(nonce: nonce)
+        try await ManagedTmuxSupervisor(configuration: configuration, journal: journal).run()
+    } catch {
+        FileHandle.standardError.write(Data("tmuxrooms-launch: rejected supervisor launch\n".utf8))
+        exit(64)
+    }
 }
