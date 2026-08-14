@@ -88,16 +88,17 @@ final class ProductionRoomActionHandler: RoomActionHandling {
 
     func perform(_ intent: RoomActionIntent) async -> AppActionResult {
         switch intent {
-        case .refresh, .automaticRefresh(revalidateRecovery: false):
+        case .refresh, .refreshRecovery, .automaticRefresh:
             controller.requestRefresh()
             await waitUntilIdle()
             if let failure = controller.refreshError { return .failed(.tmux(failure)) }
-            return await success(snapshot: controller.snapshot)
-        case .refreshRecovery, .automaticRefresh(revalidateRecovery: true):
-            controller.requestRefresh()
-            await waitUntilIdle()
-            if let failure = controller.refreshError { return .failed(.tmux(failure)) }
-            return await refreshedRecovery(snapshot: controller.snapshot)
+            let snapshot = controller.snapshot
+            return await Self.refreshResult(
+                intent: intent,
+                snapshot: snapshot,
+                loadRecovery: { try await terminal.managedRecoveryCandidates(snapshot: snapshot) },
+                loadFocusableClients: { await controller.focusableClientKeys() }
+            )
         case .delete(let token):
             guard controller.delete(token) else {
                 return .failed(.other("Another room action is still running."))
@@ -147,16 +148,6 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         await waitUntilIdle()
         if let failure = controller.refreshError { return .failed(.tmux(failure)) }
         return await map(controller.lastActionResult, snapshot: controller.snapshot)
-    }
-
-    private func refreshedRecovery(snapshot: RoomSnapshot) async -> AppActionResult {
-        let recovery = await Self.recoveryCandidatesResult {
-            try await terminal.managedRecoveryCandidates(snapshot: snapshot)
-        }
-        if case .succeeded = recovery {
-            return await success(snapshot: snapshot)
-        }
-        return recovery
     }
 
     private func busyResult() -> AppActionResult {
@@ -225,6 +216,28 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         } catch {
             return .failed(.other(String(describing: error)))
         }
+    }
+
+    static func refreshResult(
+        intent: RoomActionIntent,
+        snapshot: RoomSnapshot,
+        loadRecovery: () async throws -> [ManagedRecoveryCandidate],
+        loadFocusableClients: () async -> Set<ClientKey>
+    ) async -> AppActionResult {
+        if case .automaticRefresh(revalidateRecovery: false) = intent {
+            return .succeeded(snapshot: snapshot, focusableClients: nil)
+        }
+
+        switch intent {
+        case .refreshRecovery, .automaticRefresh(revalidateRecovery: true):
+            let recovery = await recoveryCandidatesResult(load: loadRecovery)
+            if case .failed = recovery { return recovery }
+        case .refresh:
+            break
+        default:
+            return .failed(.other("A non-refresh action reached the refresh result policy."))
+        }
+        return .succeeded(snapshot: snapshot, focusableClients: await loadFocusableClients())
     }
 
     private static func candidateLookupFailure(_ failure: ManagedTerminalError) -> AppActionFailure {

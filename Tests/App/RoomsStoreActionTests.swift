@@ -171,6 +171,41 @@ struct RoomsStoreActionTests {
         #expect(handler.intents.last == .automaticRefresh(revalidateRecovery: false))
     }
 
+    @Test("ordinary cadence refresh updates inventory without any terminal call")
+    func cadenceInventorySkipsTerminalAndPreservesFocusability() async throws {
+        let snapshot = appSnapshot(clientCount: 1)
+        let client = snapshot.rooms[0].interactiveClients[0]
+        var recoveryCalls = 0
+        var focusabilityCalls = 0
+        let result = await ProductionRoomActionHandler.refreshResult(
+            intent: .automaticRefresh(revalidateRecovery: false),
+            snapshot: snapshot,
+            loadRecovery: {
+                recoveryCalls += 1
+                return []
+            },
+            loadFocusableClients: {
+                focusabilityCalls += 1
+                return [client.key]
+            }
+        )
+        let handler = ScriptedRoomActionHandler(results: [result])
+        let store = RoomsStore(
+            snapshot: .noServer,
+            focusability: [client.key: .focusable],
+            isFixture: false,
+            handler: handler
+        )
+
+        store.automaticRefresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+
+        #expect(recoveryCalls == 0)
+        #expect(focusabilityCalls == 0)
+        #expect(store.snapshot == snapshot)
+        #expect(store.focusability(for: client) == .focusable)
+    }
+
     @Test("candidate lookup permission denial is not hidden as an empty recovery list")
     func candidateLookupPermissionIsTyped() async {
         let result = await ProductionRoomActionHandler.recoveryCandidatesResult {
