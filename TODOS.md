@@ -28,3 +28,12 @@
 - **Context:** Core v1 shows client TTY, terminal, session, and focusability but exposes no arbitrary Detach action. Do not implement broad session detach or a silent best-effort approximation.
 - **Depends on / blocked by:** A proven race-safe client-context primitive, a future tmux capability, or a separately approved ownership/control design.
 
+## Public or multi-user hardening
+
+**Scope:** Core v1 local single-user 기능 완료를 차단하지 않음.
+
+- Before any public or multi-user deployment, revisit the threat model and reassess sandboxing, Developer ID signing, notarization, and key lifecycle management.
+- Inventory TTY, path, and session metadata in logs and evidence; define redaction, retention, and user opt-out behavior before those artifacts leave the local single-user boundary.
+- Harden any public updater and its software supply chain before distributing updates outside the local development workflow.
+
+**Provenance:** This repo-local append intentionally changes `TODOS.md` byte identity; the external source follow-up artifact remains unchanged.
