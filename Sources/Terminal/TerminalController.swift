@@ -161,7 +161,9 @@ public final class TerminalController: TerminalControlling {
                     resolved.pendingPreviewTitle = nil
                     resolved.updatedAt = Date()
                     try journal.write(resolved)
-                case let .failure(error): throw ManagedTerminalError.automation(error)
+                case let .failure(error):
+                    Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal")
+                        .error("Preview title remains pending for \(resolved.nonce, privacy: .public): \(String(describing: error), privacy: .public)")
                 }
             }
             reconciled.append(resolved)
@@ -205,7 +207,9 @@ public final class TerminalController: TerminalControlling {
             try journal.write(selected)
             switch await automation.setManagedSessionTitle(terminal, nonce: selected.nonce, title: title) {
             case .success: selected.pendingPreviewTitle = nil
-            case let .failure(error): throw ManagedTerminalError.automation(error)
+            case let .failure(error):
+                Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal")
+                    .error("Preview title remains pending for \(selected.nonce, privacy: .public): \(String(describing: error), privacy: .public)")
             }
         }
         for var conflict in records where conflict.launchKind == .reusableRole && conflict.nonce != nonce && conflict.role == role {
@@ -249,15 +253,22 @@ public final class TerminalController: TerminalControlling {
 
     private func launch(kind: ManagedLaunchKind, role: ManagedRole?, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, deadline: Duration) async throws -> ManagedTerminalOutcome {
         let nonce = ManagedNonce.generate()
-        var record = ManagedClientRecord(nonce: nonce, launchKind: kind, role: role, requestedSessionToken: destination, readOnly: readOnly)
+        let previewTitle = role == .preview ? Self.previewTitle(
+            roomName: snapshot.rooms.first(where: { $0.token == destination })?.name ?? destination.sessionID
+        ) : nil
+        var record = ManagedClientRecord(
+            nonce: nonce,
+            launchKind: kind,
+            role: role,
+            requestedSessionToken: destination,
+            readOnly: readOnly,
+            pendingPreviewTitle: previewTitle
+        )
         try journal.write(record)
         try journal.writeConfiguration(.init(nonce: nonce, tmuxExecutablePath: tmuxExecutablePath, destination: destination, readOnly: readOnly))
         record.configurationState = .written; record.state = .launching; record.updatedAt = Date(); try journal.write(record)
 
-        let previewTitle = role == .preview ? Self.previewTitle(
-            roomName: snapshot.rooms.first(where: { $0.token == destination })?.name ?? destination.sessionID
-        ) : nil
-        let task = Task { @MainActor [automation] in await automation.createManagedSession(nonce: nonce, title: previewTitle) }
+        let task = Task { @MainActor [automation] in await automation.createManagedSession(nonce: nonce) }
         launches[nonce] = task
         let completed = await wait(task, deadline: deadline)
         if let completed {
