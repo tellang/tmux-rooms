@@ -8,16 +8,22 @@
 
 /* Begin PBXBuildFile section */
 		0281886B8DE2F4B8EE517096 /* TerminalPlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E88B712848F51D1D6B88A403 /* TerminalPlaceholderTests.swift */; };
+		0448083A986FDAA5A364FAC3 /* ITermAutomationSmoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8822974A516DB0AE95687E /* ITermAutomationSmoke.swift */; };
 		127ECE9E8A46BB54B7E24BA5 /* BootstrapPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A4C32246841CEBB210DEFF /* BootstrapPerformanceTests.swift */; };
+		1E6D95D5851C4247C42355EB /* ITermAutomationSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 571AC7EC2862FCD88C60CE2E /* ITermAutomationSmokeTests.swift */; };
 		27A71F7B659DD315E40C30EF /* libTmuxRoomsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */; };
 		45026E95F586998DF0D6A575 /* TerminalScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C86491329A9BB9FA0A7D1A6 /* TerminalScaffold.swift */; };
 		4641DD2EE3411406F6FE8D04 /* BootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896E6C3367F410B8BF152135 /* BootstrapTests.swift */; };
 		50866E95CB93902BFC8F71E2 /* libTmuxRoomsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */; };
+		5F8151DDCB95574D035C45B8 /* AppleScriptRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A54417C6DE80B1359EEE25 /* AppleScriptRunner.swift */; };
+		8EF0879A225BE214B86F89DD /* SmokeEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = C55493BCB7918FC24A28A050 /* SmokeEvidence.swift */; };
+		B00516D3AC83FAE3D69DA88C /* SmokeLaunchContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB31C5F8FE444CDB305CA893 /* SmokeLaunchContract.swift */; };
 		C1420C57C134B593476D09C4 /* TmuxRoomsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */; };
 		D08288034A47656EE1A291A0 /* TmuxRoomsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */; };
 		D159FC60A8F12221CA74EDA7 /* LauncherContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0134174FF8882E44AC6DC21E /* LauncherContractTests.swift */; };
 		D36512B4D9213FB4C30CDCDF /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC7BBAFAFC9B1680D06975B /* main.swift */; };
 		F25BCCD18F5D365E0FFCA9F9 /* TmuxRoomsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F09FADAC04D65B16C1C73C62 /* TmuxRoomsCore.swift */; };
+		FAA08E727497EF144A734E9A /* ITermSmokeScripts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF47E7F84171F8676C837CB1 /* ITermSmokeScripts.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,15 +62,21 @@
 		0A62498B6D0C9A790464D486 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0C86491329A9BB9FA0A7D1A6 /* TerminalScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScaffold.swift; sourceTree = "<group>"; };
 		10A8EC266806C921196CDFA6 /* tmuxrooms-launch */ = {isa = PBXFileReference; includeInIndex = 0; path = "tmuxrooms-launch"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1E8822974A516DB0AE95687E /* ITermAutomationSmoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITermAutomationSmoke.swift; sourceTree = "<group>"; };
 		24601962A482F968D4972240 /* TmuxRooms.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TmuxRooms.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsApp.swift; sourceTree = "<group>"; };
 		3F7EFE0FE2F3D793574C13C7 /* TmuxRooms.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TmuxRooms.entitlements; sourceTree = "<group>"; };
+		571AC7EC2862FCD88C60CE2E /* ITermAutomationSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITermAutomationSmokeTests.swift; sourceTree = "<group>"; };
 		5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsUITests.swift; sourceTree = "<group>"; };
 		7F41395579C228E50D22609C /* libTmuxRoomsCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libTmuxRoomsCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		896E6C3367F410B8BF152135 /* BootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapTests.swift; sourceTree = "<group>"; };
 		8DC7BBAFAFC9B1680D06975B /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		A4A4C32246841CEBB210DEFF /* BootstrapPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapPerformanceTests.swift; sourceTree = "<group>"; };
+		AB31C5F8FE444CDB305CA893 /* SmokeLaunchContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeLaunchContract.swift; sourceTree = "<group>"; };
+		AF47E7F84171F8676C837CB1 /* ITermSmokeScripts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITermSmokeScripts.swift; sourceTree = "<group>"; };
+		B0A54417C6DE80B1359EEE25 /* AppleScriptRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptRunner.swift; sourceTree = "<group>"; };
 		C1724FB192CFBF5916985A13 /* TmuxRoomsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TmuxRoomsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C55493BCB7918FC24A28A050 /* SmokeEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeEvidence.swift; sourceTree = "<group>"; };
 		D39442D00FD7AC9712271B6F /* TmuxRoomsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TmuxRoomsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E88B712848F51D1D6B88A403 /* TerminalPlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPlaceholderTests.swift; sourceTree = "<group>"; };
 		F09FADAC04D65B16C1C73C62 /* TmuxRoomsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsCore.swift; sourceTree = "<group>"; };
@@ -93,6 +105,7 @@
 		0DFCCCBD300F0032D02632A6 /* Terminal */ = {
 			isa = PBXGroup;
 			children = (
+				571AC7EC2862FCD88C60CE2E /* ITermAutomationSmokeTests.swift */,
 				E88B712848F51D1D6B88A403 /* TerminalPlaceholderTests.swift */,
 			);
 			path = Terminal;
@@ -101,6 +114,11 @@
 		3A645731877BD06E712B335F /* Terminal */ = {
 			isa = PBXGroup;
 			children = (
+				B0A54417C6DE80B1359EEE25 /* AppleScriptRunner.swift */,
+				1E8822974A516DB0AE95687E /* ITermAutomationSmoke.swift */,
+				AF47E7F84171F8676C837CB1 /* ITermSmokeScripts.swift */,
+				C55493BCB7918FC24A28A050 /* SmokeEvidence.swift */,
+				AB31C5F8FE444CDB305CA893 /* SmokeLaunchContract.swift */,
 				0C86491329A9BB9FA0A7D1A6 /* TerminalScaffold.swift */,
 			);
 			path = Terminal;
@@ -402,6 +420,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5F8151DDCB95574D035C45B8 /* AppleScriptRunner.swift in Sources */,
+				0448083A986FDAA5A364FAC3 /* ITermAutomationSmoke.swift in Sources */,
+				FAA08E727497EF144A734E9A /* ITermSmokeScripts.swift in Sources */,
+				8EF0879A225BE214B86F89DD /* SmokeEvidence.swift in Sources */,
+				B00516D3AC83FAE3D69DA88C /* SmokeLaunchContract.swift in Sources */,
 				45026E95F586998DF0D6A575 /* TerminalScaffold.swift in Sources */,
 				F25BCCD18F5D365E0FFCA9F9 /* TmuxRoomsCore.swift in Sources */,
 			);
@@ -413,6 +436,7 @@
 			files = (
 				127ECE9E8A46BB54B7E24BA5 /* BootstrapPerformanceTests.swift in Sources */,
 				4641DD2EE3411406F6FE8D04 /* BootstrapTests.swift in Sources */,
+				1E6D95D5851C4247C42355EB /* ITermAutomationSmokeTests.swift in Sources */,
 				D159FC60A8F12221CA74EDA7 /* LauncherContractTests.swift in Sources */,
 				0281886B8DE2F4B8EE517096 /* TerminalPlaceholderTests.swift in Sources */,
 			);
@@ -603,6 +627,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -746,6 +771,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
