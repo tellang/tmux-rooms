@@ -4,27 +4,36 @@ import TmuxRoomsCore
 
 @main
 struct TmuxRoomsApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: RoomsStore
     @State private var menuBarExtraInserted: Bool
     private let fixtureWindowEnabled: Bool
+    private let refreshCadence: RefreshCadence
 
     init() {
+        let store: RoomsStore
         #if DEBUG
         if let value = ProcessInfo.processInfo.environment["TMUX_ROOMS_UI_FIXTURE"] {
-            let fixtureStore = UIFixture(rawValue: value)?.makeStore() ?? UIFixture.invalidStore(value)
-            _store = StateObject(wrappedValue: fixtureStore)
+            store = UIFixture(rawValue: value)?.makeStore() ?? UIFixture.invalidStore(value)
             _menuBarExtraInserted = State(initialValue: false)
             fixtureWindowEnabled = true
         } else {
-            _store = StateObject(wrappedValue: RoomsStore.production())
+            store = RoomsStore.production()
             _menuBarExtraInserted = State(initialValue: true)
             fixtureWindowEnabled = false
         }
         #else
         // Release intentionally does not read TMUX_ROOMS_UI_FIXTURE.
-        _store = StateObject(wrappedValue: RoomsStore.production())
+        store = RoomsStore.production()
         _menuBarExtraInserted = State(initialValue: true)
         fixtureWindowEnabled = false
+        #endif
+        _store = StateObject(wrappedValue: store)
+        refreshCadence = RefreshCadence(isEnabled: !store.isFixture) {
+            store.refresh()
+        }
+        refreshCadence.start()
+        #if !DEBUG
         configureReleaseAutomationSmoke()
         #endif
     }
@@ -33,12 +42,31 @@ struct TmuxRoomsApp: App {
     var body: some Scene {
         MenuBarExtra("Tmux Rooms", systemImage: "rectangle.stack", isInserted: $menuBarExtraInserted) {
             RoomsRootView(store: store)
+                .onAppear {
+                    refreshCadence.update(activity: .foreground, refreshImmediately: true)
+                }
+                .onDisappear {
+                    refreshCadence.update(activity: .background)
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    refreshCadence.update(activity: cadenceActivity(for: phase))
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    refreshCadence.update(activity: .foreground, refreshImmediately: true)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                    refreshCadence.update(activity: .background)
+                }
         }
         .menuBarExtraStyle(.window)
 
         #if DEBUG
         FixtureWindowScene(store: store, isEnabled: fixtureWindowEnabled)
         #endif
+    }
+
+    private func cadenceActivity(for phase: ScenePhase) -> RefreshCadenceActivity {
+        phase == .active ? .foreground : .background
     }
 
     #if !DEBUG
