@@ -1,11 +1,7 @@
 import Foundation
 import TmuxRoomsCore
 
-enum OpenRoute: Sendable, Hashable {
-    case detached
-    case sole(ClientKey)
-    case chosen(ClientKey)
-}
+typealias OpenRoute = TmuxOpenRoute
 
 enum RoomActionIntent: Sendable, Hashable {
     case refresh
@@ -79,7 +75,8 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         controller = TmuxController(
             socketURL: socket,
             loader: loader,
-            deleter: TmuxDeleteExecutor(snapshotLoader: loader)
+            deleter: TmuxDeleteExecutor(snapshotLoader: loader),
+            terminal: TerminalController()
         )
     }
 
@@ -99,10 +96,28 @@ final class ProductionRoomActionHandler: RoomActionHandling {
                 return .failed(.tmux(failure))
             }
             return map(controller.lastActionResult, snapshot: controller.snapshot)
-        case .open, .preview, .duplicateWindow, .resolveManaged:
-            // T7 replaces this explicit seam with TerminalBridge wiring.
+        case let .open(token, route):
+            guard controller.open(token, route: route) else { return busyResult() }
+            return await completedAction()
+        case let .preview(token):
+            guard controller.preview(token) else { return busyResult() }
+            return await completedAction()
+        case let .duplicateWindow(token):
+            guard controller.duplicateWindow(token) else { return busyResult() }
+            return await completedAction()
+        case .resolveManaged:
             return .unavailable(.terminalWiringPending)
         }
+    }
+
+    private func completedAction() async -> AppActionResult {
+        await waitUntilIdle()
+        if let failure = controller.refreshError { return .failed(.tmux(failure)) }
+        return map(controller.lastActionResult, snapshot: controller.snapshot)
+    }
+
+    private func busyResult() -> AppActionResult {
+        .failed(.other("Another room action is still running."))
     }
 
     private func waitUntilIdle() async {
@@ -120,6 +135,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         case .terminalFailure(.permissionDenied): .failed(.automationDenied)
         case .terminalFailure(.staleTarget), .terminalFailure(.notFound): .failed(.staleTarget)
         case .terminalFailure(.timeout): .failed(.timeout(underlyingOperationRunning: false))
+        case .terminalFailure(.operationPending): .failed(.timeout(underlyingOperationRunning: true))
         case .terminalFailure(.ambiguous): .failed(.ambiguousManaged)
         case .terminalFailure(let failure): .failed(.terminal(failure))
         case nil: .failed(.other("The action completed without a result."))

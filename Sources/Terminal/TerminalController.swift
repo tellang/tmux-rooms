@@ -32,16 +32,17 @@ public final class TerminalController: TerminalControlling {
         }
         if candidates.count > 1 || candidates.contains(where: { $0.state == .ambiguous }) { return .ambiguous(candidates) }
         guard let candidate = candidates.first else { throw ManagedTerminalError.invalidRecord }
-        if candidate.pendingSwitch != nil { return .pending(candidate) }
-        if [.launching, .timedOutButRunning, .completedNeedsReconcile, .provisional].contains(candidate.state) { return .pending(candidate) }
         if candidate.state == .failed { return .failed(candidate) }
-
-        guard candidate.state == .complete || candidate.state == .recovered else { return .failed(candidate) }
+        if candidate.pendingSwitch == nil, [.launching, .timedOutButRunning, .provisional].contains(candidate.state) {
+            return .pending(candidate)
+        }
         _ = try await reconcile(snapshot: snapshot)
         candidates = try journal.reusableRecords(role: role)
         guard candidates.count == 1, let existing = candidates.first else { return .ambiguous(candidates) }
         if existing.state == .ambiguous { return .ambiguous(candidates) }
         if existing.state == .failed { return .failed(existing) }
+        if existing.pendingSwitch != nil { return .pending(existing) }
+        if [.launching, .timedOutButRunning, .completedNeedsReconcile, .provisional].contains(existing.state) { return .pending(existing) }
         guard existing.state == .complete || existing.state == .recovered else { return .pending(existing) }
 
         if existing.requestedSessionToken == destination, existing.readOnly == readOnly,
@@ -149,7 +150,9 @@ public final class TerminalController: TerminalControlling {
     private func absorb(_ result: Result<ManagedTerminalReference, SmokeAutomationError>, nonce: String, snapshot: RoomSnapshot) throws -> ManagedTerminalOutcome {
         guard var record = try journal.read(nonce: nonce) else { throw ManagedTerminalError.invalidRecord }
         switch result {
-        case .failure: record.state = .failed; record.updatedAt = Date(); try journal.write(record); return .failed(record)
+        case let .failure(error):
+            record.state = .failed; record.updatedAt = Date(); try journal.write(record)
+            throw ManagedTerminalError.automation(error)
         case let .success(reference):
             let priorState = record.state
             record.terminal = reference; record.state = .completedNeedsReconcile; record.updatedAt = Date(); try journal.write(record)

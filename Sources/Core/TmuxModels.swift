@@ -76,4 +76,13 @@ public enum TmuxFailure: Error, Sendable, Hashable {
     case malformedOutput(String); case unsupportedVersion(String); case commandFailed(exitCode: Int32, stderr: String)
     case timedOut; case cancelled; case outputLimitExceeded; case endpointChanged; case endpointPermissionDenied; case launchFailed(String)
 }
-public enum TerminalFailure: Error, Sendable, Hashable { case permissionDenied; case timeout; case staleTarget; case notFound; case ambiguous; case invalidReply; case scriptFailure(number: Int?) }
+public enum TerminalFailure: Error, Sendable, Hashable {
+    case permissionDenied
+    case timeout
+    case operationPending
+    case staleTarget
+    case notFound
+    case ambiguous
+    case invalidReply
+    case scriptFailure(number: Int?)
+}

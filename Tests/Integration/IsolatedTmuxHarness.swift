@@ -25,7 +25,7 @@ final class IsolatedTmuxHarness: @unchecked Sendable {
         #expect(socket.path != defaultPath)
     }
 
-    static func withHarness(_ body:(IsolatedTmuxHarness) async throws -> Void) async throws {
+    static func withHarness(_ body: @Sendable (IsolatedTmuxHarness) async throws -> Void) async throws {
         let harness=try IsolatedTmuxHarness()
         do { try await body(harness); try harness.cleanup() }
         catch { try? harness.cleanup(); throw error }

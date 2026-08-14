@@ -122,6 +122,21 @@ func initialReusableRoleLaunchesOnce() async throws {
     #expect(try journal.reusableRecords(role: .primary).count == 1)
 }
 
+@Test("initial Automation launch failure preserves its typed cause")
+@MainActor
+func initialAutomationFailurePreservesCause() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let fake = FakeManagedAutomation(create: .immediate(.failure(.permissionDenied)))
+    do {
+        _ = try await TerminalController(automation: fake, journal: journal)
+            .ensureManaged(role: .primary, destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .seconds(1))
+        Issue.record("expected typed Automation failure")
+    } catch let error as ManagedTerminalError {
+        #expect(error == .automation(.permissionDenied))
+    }
+    #expect(try journal.reusableRecords(role: .primary).first?.state == .failed)
+}
+
 private func roleRecord(state: ManagedRecordState, liveKey: ClientKey? = nil) -> ManagedClientRecord {
     ManagedClientRecord(nonce: ManagedNonce.generate(), launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .written, state: state, terminal: managedReference, liveClientKey: liveKey)
 }
