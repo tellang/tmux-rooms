@@ -13,7 +13,6 @@
 		45026E95F586998DF0D6A575 /* TerminalScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C86491329A9BB9FA0A7D1A6 /* TerminalScaffold.swift */; };
 		4641DD2EE3411406F6FE8D04 /* BootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896E6C3367F410B8BF152135 /* BootstrapTests.swift */; };
 		50866E95CB93902BFC8F71E2 /* libTmuxRoomsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */; };
-		B152D4ACA6DEC160ED87C8E7 /* tmuxrooms-launch in Resources */ = {isa = PBXBuildFile; fileRef = 10A8EC266806C921196CDFA6 /* tmuxrooms-launch */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C1420C57C134B593476D09C4 /* TmuxRoomsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */; };
 		D08288034A47656EE1A291A0 /* TmuxRoomsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */; };
 		D159FC60A8F12221CA74EDA7 /* LauncherContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0134174FF8882E44AC6DC21E /* LauncherContractTests.swift */; };
@@ -254,7 +253,6 @@
 			buildConfigurationList = BA5864D609E74F20D9B2C264 /* Build configuration list for PBXNativeTarget "TmuxRooms" */;
 			buildPhases = (
 				30207EF0897CDA29EAC1CB9C /* Sources */,
-				CCBAB964A44EF30D3103CA6E /* Resources */,
 				EBABCC03399770CE24F4A9F7 /* Frameworks */,
 				1691C380A1E98A9325282A3C /* Embed tmuxrooms-launch */,
 			);
@@ -342,17 +340,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* Begin PBXResourcesBuildPhase section */
-		CCBAB964A44EF30D3103CA6E /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				B152D4ACA6DEC160ED87C8E7 /* tmuxrooms-launch in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		1691C380A1E98A9325282A3C /* Embed tmuxrooms-launch */ = {
@@ -535,6 +522,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Tmux Rooms Local Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -673,6 +661,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/App/TmuxRooms.entitlements;
 				CODE_SIGN_IDENTITY = "Tmux Rooms Local Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;

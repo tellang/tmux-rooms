@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class TmuxRoomsUITests: XCTestCase {
     func testFixtureLaunchesPlaceholderApp() {
         let app = XCUIApplication()

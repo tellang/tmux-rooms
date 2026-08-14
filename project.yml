@@ -36,6 +36,7 @@ targets:
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 
   TmuxRooms:
     type: application
@@ -45,6 +46,8 @@ targets:
     dependencies:
       - target: TmuxRoomsCore
       - target: tmuxrooms-launch
+        link: false
+        embed: false
     entitlements:
       path: Sources/App/TmuxRooms.entitlements
       properties:
@@ -70,6 +73,7 @@ targets:
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
     postBuildScripts:
       - name: Embed tmuxrooms-launch
         basedOnDependencyAnalysis: false
