@@ -175,6 +175,109 @@ func managedRoleSwitchReuse() async throws {
     #expect(reconciled.first?.state == .complete)
 }
 
+@Test("concurrent managed switches persist one intent and send exactly one request")
+@MainActor
+func concurrentSwitchSingleFlight() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let beforeSwitch = RoomSnapshot(server: managedServer, rooms: [managedSnapshot().rooms[0], .init(token: destination, name: "two", lastActivityAtUnixSeconds: 1, panes: [], clients: [])])
+    let supervisor = SuspendedSupervisorClient()
+    let controller = TerminalController(automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)]), journal: journal, supervisorClient: supervisor)
+    let first = Task { @MainActor in try await controller.ensureManaged(role: .primary, destination: destination, readOnly: false, snapshot: beforeSwitch, softDeadline: .seconds(1)) }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+    while await supervisor.count == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(await supervisor.count == 1)
+    let durableRecords = try journal.reusableRecords(role: .primary)
+    let persisted = try #require(durableRecords.first)
+    #expect(persisted.pendingSwitch?.destination == destination)
+    let second = try await controller.ensureManaged(role: .primary, destination: destination, readOnly: false, snapshot: beforeSwitch, softDeadline: .milliseconds(10))
+    guard case .pending = second else { Issue.record("concurrent ensure must observe pending switch"); return }
+    #expect(await supervisor.count == 1)
+    await supervisor.complete(status: .completed, childPID: 77)
+    guard case .pending = try await first.value else { Issue.record("fresh snapshot is required after switch"); return }
+    #expect(await supervisor.count == 1)
+}
+
+@Test("pending switch recovers from durable response and matching handshake after crash")
+@MainActor
+func switchCrashRecovery() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate(), requestID = UUID()
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let destinationKey = ClientKey(server: managedServer, clientName: managedKey.clientName, tty: managedKey.tty, clientPID: 77, createdAtUnixSeconds: 8)
+    let intent = ManagedSwitchIntent(requestID: requestID, destination: destination, readOnly: false, previousSessionToken: managedToken, previousReadOnly: false, previousChildPID: 11, previousLiveClientKey: managedKey, previousState: .complete)
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .launching, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey, requestID: requestID, pendingSwitch: intent)
+    try journal.write(record)
+    try journal.atomicWrite(ManagedSupervisorResponse(requestID: requestID, status: .completed, childPID: 77), to: journal.responsesDirectory.appending(path: "\(requestID.uuidString).json"))
+    try journal.atomicWrite(ManagedSupervisorHandshake(nonce: nonce, supervisorPID: 10, childPID: 77, destination: destination, readOnly: false), to: journal.handshakeURL(nonce))
+    let snapshot = RoomSnapshot(server: managedServer, rooms: [.init(token: destination, name: "two", lastActivityAtUnixSeconds: 1, panes: [], clients: [.init(key: destinationKey, lastActivityAtUnixSeconds: 1, flags: [], isReadOnly: false, terminalName: "iTerm2", isControlMode: false)])])
+    let recovered = try await TerminalController(automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)]), journal: journal).reconcile(snapshot: snapshot)
+    #expect(recovered.first?.requestedSessionToken == destination)
+    #expect(recovered.first?.childPID == 77)
+    #expect(recovered.first?.liveClientKey == destinationKey)
+    #expect(recovered.first?.pendingSwitch == nil)
+    #expect(recovered.first?.state == .complete)
+}
+
+@Test("pending switch recovers from a matching supervisor handshake without a response")
+@MainActor
+func switchCrashRecoveryFromHandshakeOnly() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate(), requestID = UUID()
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let destinationKey = ClientKey(server: managedServer, clientName: managedKey.clientName, tty: managedKey.tty, clientPID: 78, createdAtUnixSeconds: 8)
+    let intent = ManagedSwitchIntent(requestID: requestID, destination: destination, readOnly: false, previousSessionToken: managedToken, previousReadOnly: false, previousChildPID: 11, previousLiveClientKey: managedKey, previousState: .complete)
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .launching, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey, requestID: requestID, pendingSwitch: intent)
+    try journal.write(record)
+    try journal.atomicWrite(ManagedSupervisorHandshake(nonce: nonce, supervisorPID: 10, childPID: 78, destination: destination, readOnly: false), to: journal.handshakeURL(nonce))
+    let snapshot = RoomSnapshot(server: managedServer, rooms: [.init(token: destination, name: "two", lastActivityAtUnixSeconds: 1, panes: [], clients: [.init(key: destinationKey, lastActivityAtUnixSeconds: 1, flags: [], isReadOnly: false, terminalName: "iTerm2", isControlMode: false)])])
+    let recovered = try await TerminalController(automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)]), journal: journal).reconcile(snapshot: snapshot)
+    #expect(recovered.first?.requestedSessionToken == destination)
+    #expect(recovered.first?.childPID == 78)
+    #expect(recovered.first?.liveClientKey == destinationKey)
+    #expect(recovered.first?.pendingSwitch == nil)
+}
+
+@Test("rejected durable switch restores the previous live owner")
+@MainActor
+func rejectedSwitchRollback() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate(), requestID = UUID()
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let intent = ManagedSwitchIntent(requestID: requestID, destination: destination, readOnly: false, previousSessionToken: managedToken, previousReadOnly: false, previousChildPID: 11, previousLiveClientKey: managedKey, previousState: .complete)
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .launching, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey, requestID: requestID, pendingSwitch: intent)
+    try journal.write(record)
+    try journal.atomicWrite(ManagedSupervisorResponse(requestID: requestID, status: .rejected, childPID: 11), to: journal.responsesDirectory.appending(path: "\(requestID.uuidString).json"))
+    try journal.atomicWrite(ManagedSupervisorHandshake(nonce: nonce, supervisorPID: 10, childPID: 11, destination: managedToken, readOnly: false), to: journal.handshakeURL(nonce))
+    let recovered = try await TerminalController(automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)]), journal: journal).reconcile(snapshot: managedSnapshot())
+    #expect(recovered.first?.requestedSessionToken == managedToken)
+    #expect(recovered.first?.liveClientKey == managedKey)
+    #expect(recovered.first?.pendingSwitch == nil)
+    #expect(recovered.first?.state == .complete)
+}
+
+@Test("malformed durable role record blocks creation and identifies its path")
+@MainActor
+func corruptJournalFailsClosed() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let records = root.appending(path: "records", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: records, withIntermediateDirectories: true)
+    let corrupt = records.appending(path: "broken.json")
+    try Data("not-json".utf8).write(to: corrupt)
+    let fake = FakeManagedAutomation()
+    do {
+        _ = try await TerminalController(automation: fake, journal: journal).ensureManaged(role: .primary, destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .milliseconds(10))
+        Issue.record("corrupt durable record must throw")
+    } catch let ManagedTerminalError.corruptRecord(path) {
+        #expect(URL(fileURLWithPath: path).resolvingSymlinksInPath() == corrupt.resolvingSymlinksInPath())
+    }
+    #expect(fake.createCalls == 0)
+    #expect(try FileManager.default.contentsOfDirectory(at: records, includingPropertiesForKeys: nil).count == 1)
+}
+
 @Test("arbitrary live client focus uses unique exact TTY to GUID without tmux mutation")
 @MainActor
 func genericClientFocus() async throws {
@@ -203,6 +306,23 @@ func timeoutLateSuccessSingleFlight() async throws {
     #expect(fake.createCalls == 1)
 }
 
+@Test("late Automation journal failure is surfaced instead of silently discarded")
+@MainActor
+func lateAutomationFailureIsSurfaced() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let fake = FakeManagedAutomation(create: .suspended)
+    let diagnostics = LateFailureRecorder()
+    let controller = TerminalController(automation: fake, journal: journal, lateFailureHandler: { message in diagnostics.record(message) })
+    let outcome = try await controller.ensureManaged(role: .primary, destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .milliseconds(20))
+    guard case let .pending(record) = outcome else { Issue.record("expected timed-out launch"); return }
+    try Data("corrupt".utf8).write(to: root.appending(path: "records/\(record.nonce).json"), options: .atomic)
+    fake.complete(.success(managedReference))
+    let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+    while diagnostics.messages.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(diagnostics.messages.count == 1)
+    #expect(diagnostics.messages.first?.contains(record.nonce) == true)
+}
+
 @Test("explicit duplicates are separate records while managed roles remain reusable")
 @MainActor
 func duplicatePolicyBoundary() async throws {
@@ -220,14 +340,18 @@ func duplicatePolicyBoundary() async throws {
 @Test("helper CLI and golden command admit only a fixed path plus alphanumeric nonce")
 func helperCommandContract() throws {
     let nonce = "A1b2C3d4E5f6G7h8I9j0K1L2"
+    let system = try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/Applications/Tmux Rooms.app"), homeDirectory: URL(fileURLWithPath: "/Users/tester"))
+    let user = try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/Users/tester/Applications/Tmux Rooms.app"), homeDirectory: URL(fileURLWithPath: "/Users/tester"))
     #expect(try ManagedSupervisorCLI.parse(arguments: ["--supervise", nonce]) == nonce)
-    #expect(try ITermManagedScripts.command(nonce: nonce) == "'/Applications/Tmux Rooms.app/Contents/Helpers/tmuxrooms-launch' --supervise \(nonce)")
+    #expect(try ITermManagedScripts.command(nonce: nonce, helperPath: system) == "'/Applications/Tmux Rooms.app/Contents/Helpers/tmuxrooms-launch' --supervise \(nonce)")
+    #expect(try ITermManagedScripts.command(nonce: nonce, helperPath: user) == "'/Users/tester/Applications/Tmux Rooms.app/Contents/Helpers/tmuxrooms-launch' --supervise \(nonce)")
+    #expect(throws: ManagedTerminalError.self) { try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/tmp/Tmux Rooms.app"), homeDirectory: URL(fileURLWithPath: "/Users/tester")) }
     for arguments in [["--supervise", "short"], ["--supervise", "bad/value________________"], ["--supervise", nonce, "extra"], ["--root", "/tmp"]] {
         #expect(throws: ManagedSupervisorFailure.self) { try ManagedSupervisorCLI.parse(arguments: arguments) }
     }
-    let script = try ITermManagedScripts.create(nonce: nonce)
+    let script = try ITermManagedScripts.create(nonce: nonce, helperPath: system)
     #expect(script.contains(ITermManagedScripts.nonceVariable))
-    #expect(script.contains(ITermManagedScripts.helperPath))
+    #expect(script.contains(system.path))
     #expect(script.contains("create window with default profile command"))
     #expect(!script.contains("write text"))
     #expect(!script.contains(managedToken.sessionID))
@@ -236,11 +360,12 @@ func helperCommandContract() throws {
 
 @Test("managed AppleScript decoding requires returned nonce and fixed ownership fields")
 @MainActor
-func managedAppleScriptFake() async {
+func managedAppleScriptFake() async throws {
     let nonce = ManagedNonce.generate()
     let value: AppleScriptValue = .list([.integer(8), .integer(1), .string("GUID-1"), .string("/dev/ttys099"), .string(nonce)])
     let runner = ManagedScriptRunner([.success(value), .success(.list([value]))])
-    let automation = ITermManagedAutomation(runner: runner)
+    let helper = try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/Applications/Tmux Rooms.app"))
+    let automation = ITermManagedAutomation(runner: runner, helperPath: helper)
     #expect(await automation.createManagedSession(nonce: nonce) == .success(managedReference))
     #expect(await automation.enumerateManagedSessions() == .success([.init(terminal: managedReference, nonce: nonce)]))
 }
@@ -258,4 +383,25 @@ private actor FakeSupervisorClient: ManagedSupervisorRequesting {
         count += 1
         return .init(requestID: request.id, status: .completed, childPID: 77)
     }
+}
+
+private actor SuspendedSupervisorClient: ManagedSupervisorRequesting {
+    private(set) var count = 0
+    private var request: ManagedSupervisorRequest?
+    private var continuation: CheckedContinuation<ManagedSupervisorResponse, Error>?
+    func send(_ request: ManagedSupervisorRequest, deadline: Duration) async throws -> ManagedSupervisorResponse {
+        count += 1; self.request = request
+        return try await withCheckedThrowingContinuation { continuation = $0 }
+    }
+    func complete(status: ManagedSupervisorResponseStatus, childPID: Int32?) {
+        guard let request else { return }
+        continuation?.resume(returning: .init(requestID: request.id, status: status, childPID: childPID))
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class LateFailureRecorder {
+    private(set) var messages: [String] = []
+    func record(_ message: String) { messages.append(message) }
 }

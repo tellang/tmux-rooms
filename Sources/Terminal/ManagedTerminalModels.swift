@@ -41,6 +41,23 @@ public struct ManagedTerminalReference: Sendable, Codable, Equatable {
     }
 }
 
+public struct ManagedSwitchIntent: Sendable, Codable, Equatable {
+    public let requestID: UUID
+    public let destination: SessionToken
+    public let readOnly: Bool
+    public let previousSessionToken: SessionToken
+    public let previousReadOnly: Bool
+    public let previousChildPID: Int32?
+    public let previousLiveClientKey: ClientKey?
+    public let previousState: ManagedRecordState
+
+    public init(requestID: UUID, destination: SessionToken, readOnly: Bool, previousSessionToken: SessionToken, previousReadOnly: Bool, previousChildPID: Int32?, previousLiveClientKey: ClientKey?, previousState: ManagedRecordState) {
+        self.requestID = requestID; self.destination = destination; self.readOnly = readOnly
+        self.previousSessionToken = previousSessionToken; self.previousReadOnly = previousReadOnly
+        self.previousChildPID = previousChildPID; self.previousLiveClientKey = previousLiveClientKey; self.previousState = previousState
+    }
+}
+
 public struct ManagedClientRecord: Sendable, Codable, Equatable {
     public var nonce: String
     public var launchKind: ManagedLaunchKind
@@ -54,6 +71,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
     public var childPID: Int32?
     public var liveClientKey: ClientKey?
     public var requestID: UUID?
+    public var pendingSwitch: ManagedSwitchIntent?
     public var updatedAt: Date
 
     public init(
@@ -69,6 +87,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
         childPID: Int32? = nil,
         liveClientKey: ClientKey? = nil,
         requestID: UUID? = nil,
+        pendingSwitch: ManagedSwitchIntent? = nil,
         updatedAt: Date = Date()
     ) {
         self.nonce = nonce
@@ -83,6 +102,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
         self.childPID = childPID
         self.liveClientKey = liveClientKey
         self.requestID = requestID
+        self.pendingSwitch = pendingSwitch
         self.updatedAt = updatedAt
     }
 }
@@ -107,6 +127,7 @@ public enum ManagedTerminalError: Error, Sendable, Equatable {
     case ambiguous
     case staleOwnership
     case journal(String)
+    case corruptRecord(path: String)
 }
 
 extension ServerIdentity: Codable {

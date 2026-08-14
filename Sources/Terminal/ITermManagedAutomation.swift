@@ -15,13 +15,27 @@ public struct ManagedSessionEvidence: Sendable, Equatable {
     public init(terminal: ManagedTerminalReference, nonce: String) { self.terminal = terminal; self.nonce = nonce }
 }
 
+public struct ITermBundledHelperPath: Sendable, Equatable {
+    public let path: String
+    private init(path: String) { self.path = path }
+
+    public static func resolve(bundleURL: URL, homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> Self {
+        let actual = bundleURL.standardizedFileURL.path
+        let allowed = [
+            URL(fileURLWithPath: "/Applications/Tmux Rooms.app").standardizedFileURL.path,
+            homeDirectory.appending(path: "Applications/Tmux Rooms.app").standardizedFileURL.path
+        ]
+        guard allowed.contains(actual) else { throw ManagedTerminalError.invalidRecord }
+        return .init(path: bundleURL.appending(path: "Contents/Helpers/tmuxrooms-launch").standardizedFileURL.path)
+    }
+}
+
 public enum ITermManagedScripts {
-    public static let helperPath = "/Applications/Tmux Rooms.app/Contents/Helpers/tmuxrooms-launch"
     public static let nonceVariable = "user.tmuxRoomsNonce"
 
-    public static func command(nonce: String) throws -> String {
+    public static func command(nonce: String, helperPath: ITermBundledHelperPath) throws -> String {
         guard ManagedNonce.isValid(nonce) else { throw ManagedTerminalError.invalidNonce }
-        return "'\(helperPath)' --supervise \(nonce)"
+        return "'\(helperPath.path)' --supervise \(nonce)"
     }
 
     public static let enumerate = """
@@ -46,9 +60,9 @@ public enum ITermManagedScripts {
     end timeout
     """
 
-    public static func create(nonce: String) throws -> String {
+    public static func create(nonce: String, helperPath: ITermBundledHelperPath) throws -> String {
         let nonceLiteral = try AppleScriptLiteral.string(nonce)
-        let commandLiteral = try AppleScriptLiteral.string(command(nonce: nonce))
+        let commandLiteral = try AppleScriptLiteral.string(command(nonce: nonce, helperPath: helperPath))
         return """
         with timeout of 5 seconds
             tell application id "com.googlecode.iterm2"
@@ -102,7 +116,11 @@ public enum ITermManagedScripts {
 @MainActor
 public struct ITermManagedAutomation: ManagedITermAutomating {
     private let runner: any AppleScriptRunning
-    public init(runner: any AppleScriptRunning = FoundationAppleScriptRunner()) { self.runner = runner }
+    private let helperPath: ITermBundledHelperPath?
+    public init(runner: any AppleScriptRunning = FoundationAppleScriptRunner(), bundleURL: URL = Bundle.main.bundleURL, homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        self.runner = runner; self.helperPath = try? .resolve(bundleURL: bundleURL, homeDirectory: homeDirectory)
+    }
+    public init(runner: any AppleScriptRunning, helperPath: ITermBundledHelperPath) { self.runner = runner; self.helperPath = helperPath }
 
     public func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError> {
         switch await runner.execute(source: ITermSmokeScripts.enumerate) {
@@ -127,7 +145,8 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
 
     public func createManagedSession(nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
         do {
-            switch await runner.execute(source: try ITermManagedScripts.create(nonce: nonce)) {
+            guard let helperPath else { return .failure(.invalidReply) }
+            switch await runner.execute(source: try ITermManagedScripts.create(nonce: nonce, helperPath: helperPath)) {
             case let .failure(number, _): return .failure(map(number))
             case let .success(value):
                 guard let evidence = Self.decodeEvidence(value), evidence.nonce == nonce else { return .failure(.invalidReply) }

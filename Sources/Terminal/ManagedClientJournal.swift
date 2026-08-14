@@ -33,9 +33,12 @@ public struct ManagedClientJournal: Sendable {
 
     public func allRecords() throws -> [ManagedClientRecord] {
         guard FileManager.default.fileExists(atPath: recordsDirectory.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(at: recordsDirectory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
-            .compactMap { try? decoder.decode(ManagedClientRecord.self, from: Data(contentsOf: $0)) }
+        var records: [ManagedClientRecord] = []
+        for url in try FileManager.default.contentsOfDirectory(at: recordsDirectory, includingPropertiesForKeys: nil).filter({ $0.pathExtension == "json" }).sorted(by: { $0.path < $1.path }) {
+            do { records.append(try decoder.decode(ManagedClientRecord.self, from: Data(contentsOf: url))) }
+            catch { throw ManagedTerminalError.corruptRecord(path: url.path) }
+        }
+        return records
     }
 
     public func reusableRecords(role: ManagedRole) throws -> [ManagedClientRecord] {
@@ -62,6 +65,12 @@ public struct ManagedClientJournal: Sendable {
         let url = handshakeURL(nonce)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return try decoder.decode(ManagedSupervisorHandshake.self, from: Data(contentsOf: url))
+    }
+
+    public func readResponse(requestID: UUID) throws -> ManagedSupervisorResponse? {
+        let url = responsesDirectory.appending(path: "\(requestID.uuidString).json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try decoder.decode(ManagedSupervisorResponse.self, from: Data(contentsOf: url))
     }
 
     public var requestsDirectory: URL { root.appending(path: "requests", directoryHint: .isDirectory) }

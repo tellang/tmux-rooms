@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 @MainActor
 public protocol TerminalControlling: Sendable {
@@ -14,11 +15,13 @@ public final class TerminalController: TerminalControlling {
     private let journal: ManagedClientJournal
     private let tmuxExecutablePath: String
     private let supervisorClient: any ManagedSupervisorRequesting
+    private let lateFailureHandler: @MainActor @Sendable (String) -> Void
     private var launches: [String: Task<Result<ManagedTerminalReference, SmokeAutomationError>, Never>] = [:]
 
-    public init(automation: any ManagedITermAutomating = ITermManagedAutomation(), journal: ManagedClientJournal = .init(), tmuxExecutablePath: String = "/opt/homebrew/bin/tmux", supervisorClient: (any ManagedSupervisorRequesting)? = nil) {
+    public init(automation: any ManagedITermAutomating = ITermManagedAutomation(), journal: ManagedClientJournal = .init(), tmuxExecutablePath: String = "/opt/homebrew/bin/tmux", supervisorClient: (any ManagedSupervisorRequesting)? = nil, lateFailureHandler: (@MainActor @Sendable (String) -> Void)? = nil) {
         self.automation = automation; self.journal = journal; self.tmuxExecutablePath = tmuxExecutablePath
         self.supervisorClient = supervisorClient ?? ManagedSupervisorClient(journal: journal)
+        self.lateFailureHandler = lateFailureHandler ?? { message in Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal").error("\(message, privacy: .public)") }
     }
 
     public func ensureManaged(role: ManagedRole, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration = .seconds(5)) async throws -> ManagedTerminalOutcome {
@@ -29,6 +32,7 @@ public final class TerminalController: TerminalControlling {
         }
         if candidates.count > 1 || candidates.contains(where: { $0.state == .ambiguous }) { return .ambiguous(candidates) }
         guard let candidate = candidates.first else { throw ManagedTerminalError.invalidRecord }
+        if candidate.pendingSwitch != nil { return .pending(candidate) }
         if [.launching, .timedOutButRunning, .completedNeedsReconcile, .provisional].contains(candidate.state) { return .pending(candidate) }
         if candidate.state == .failed { return .failed(candidate) }
 
@@ -43,16 +47,21 @@ public final class TerminalController: TerminalControlling {
         if existing.requestedSessionToken == destination, existing.readOnly == readOnly,
            let key = existing.liveClientKey, snapshot.rooms.flatMap(\.clients).contains(where: { $0.key == key }) { return .ready(existing) }
         let request = ManagedSupervisorRequest(nonce: existing.nonce, action: .switchSession(destination, readOnly: readOnly))
+        let intent = ManagedSwitchIntent(requestID: request.id, destination: destination, readOnly: readOnly, previousSessionToken: existing.requestedSessionToken, previousReadOnly: existing.readOnly, previousChildPID: existing.childPID, previousLiveClientKey: existing.liveClientKey, previousState: existing.state)
+        var switching = existing
+        switching.pendingSwitch = intent; switching.requestID = request.id; switching.state = .launching; switching.updatedAt = Date()
+        try journal.write(switching)
         let response = try await supervisorClient.send(request, deadline: .seconds(3))
-        guard response.status == .completed else { throw ManagedTerminalError.staleOwnership }
-        var switched = existing
+        guard response.status == .completed else {
+            let restored = rollback(intent: intent, record: switching)
+            try journal.write(restored)
+            return .ready(restored)
+        }
+        var switched = switching
         switched.requestedSessionToken = destination; switched.readOnly = readOnly; switched.childPID = response.childPID
-        switched.liveClientKey = nil; switched.requestID = request.id; switched.state = .completedNeedsReconcile; switched.updatedAt = Date()
+        switched.liveClientKey = nil; switched.state = .completedNeedsReconcile; switched.updatedAt = Date()
         try journal.write(switched)
-        let evidence: [ManagedSessionEvidence]
-        switch await automation.enumerateManagedSessions() { case let .success(value): evidence = value; case let .failure(error): throw ManagedTerminalError.automation(error) }
-        let resolved = try reconcile(switched, evidence: evidence, snapshot: snapshot)
-        return resolved.state == .complete || resolved.state == .recovered ? .ready(resolved) : .pending(resolved)
+        return .pending(switched)
     }
 
     public func launchDuplicate(destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration = .seconds(5)) async throws -> ManagedTerminalOutcome {
@@ -85,9 +94,10 @@ public final class TerminalController: TerminalControlling {
         }
         var reconciled: [ManagedClientRecord] = []
         for record in try journal.allRecords() {
-            var withHandshake = record
-            if let handshake = try journal.readHandshake(nonce: record.nonce) {
-                guard handshake.nonce == record.nonce else { continue }
+            let recovered = try recoverPendingSwitch(record)
+            if recovered.unresolved { reconciled.append(recovered.record); continue }
+            var withHandshake = recovered.record
+            if let handshake = try journal.readHandshake(nonce: record.nonce), handshake.destination == withHandshake.requestedSessionToken, handshake.readOnly == withHandshake.readOnly {
                 withHandshake.supervisorPID = handshake.supervisorPID; withHandshake.childPID = handshake.childPID
                 withHandshake.configurationState = .handshakeObserved
             }
@@ -115,7 +125,12 @@ public final class TerminalController: TerminalControlling {
             let result = await task.value
             guard let self else { return }
             self.launches[nonce] = nil
-            _ = try? self.absorb(result, nonce: nonce, snapshot: snapshot)
+            do { _ = try self.absorb(result, nonce: nonce, snapshot: snapshot) }
+            catch {
+                let message = "Late Automation absorption failed for \(nonce): \(String(describing: error))"
+                self.persistLateFailure(nonce: nonce, message: message)
+                self.lateFailureHandler(message)
+            }
         }
         return .pending(record)
     }
@@ -166,10 +181,49 @@ public final class TerminalController: TerminalControlling {
             return record
         }
         record.liveClientKey = exact[0].key
+        record.pendingSwitch = nil
         record.configurationState = .handshakeObserved
         record.state = [.timedOutButRunning, .launching, .provisional].contains(original.state) ? .recovered : .complete
         record.updatedAt = Date(); try journal.write(record)
         return record
+    }
+
+    private func recoverPendingSwitch(_ original: ManagedClientRecord) throws -> (record: ManagedClientRecord, unresolved: Bool) {
+        guard let intent = original.pendingSwitch else { return (original, false) }
+        var record = original
+        if record.requestedSessionToken == intent.destination, record.readOnly == intent.readOnly, record.state == .completedNeedsReconcile { return (record, false) }
+        let response = try journal.readResponse(requestID: intent.requestID)
+        let handshake = try journal.readHandshake(nonce: record.nonce)
+        if response?.status == .rejected {
+            record = rollback(intent: intent, record: record)
+            try journal.write(record)
+            return (record, false)
+        }
+        let handshakeMatches = handshake?.destination == intent.destination && handshake?.readOnly == intent.readOnly
+        guard response?.status == .completed || handshakeMatches else { return (record, true) }
+        record.requestedSessionToken = intent.destination; record.readOnly = intent.readOnly
+        record.liveClientKey = nil; record.requestID = intent.requestID; record.state = .completedNeedsReconcile
+        record.childPID = response?.childPID ?? handshake?.childPID
+        if handshakeMatches { record.supervisorPID = handshake?.supervisorPID; record.configurationState = .handshakeObserved }
+        record.updatedAt = Date(); try journal.write(record)
+        return (record, false)
+    }
+
+    private func rollback(intent: ManagedSwitchIntent, record original: ManagedClientRecord) -> ManagedClientRecord {
+        var record = original
+        record.requestedSessionToken = intent.previousSessionToken; record.readOnly = intent.previousReadOnly
+        record.childPID = intent.previousChildPID; record.liveClientKey = intent.previousLiveClientKey
+        record.state = intent.previousState; record.pendingSwitch = nil; record.requestID = nil; record.updatedAt = Date()
+        return record
+    }
+
+    private func persistLateFailure(nonce: String, message: String) {
+        do {
+            guard var record = try journal.read(nonce: nonce) else { throw ManagedTerminalError.invalidRecord }
+            record.state = .failed; record.updatedAt = Date(); try journal.write(record)
+        } catch {
+            Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal").error("Unable to persist late failure for \(nonce, privacy: .public): \(String(describing: error), privacy: .public); original: \(message, privacy: .public)")
+        }
     }
 }
 
