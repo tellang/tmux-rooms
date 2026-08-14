@@ -13,7 +13,7 @@ private actor FakeRunner: TmuxCommandRunning {
 @Test("snapshot argv is static, explicit, noncreating, and exactly one runner call")
 func goldenInvocation() async throws {
     let socket = URL(fileURLWithPath: "/tmp/does-not-exist-t3.sock")
-    let fake = FakeRunner(.init(exitCode: 1, termination: .exit, stdout: Data(), stderr: Data("no server running on /tmp/does-not-exist-t3.sock\n".utf8)))
+    let fake = FakeRunner(.init(exitCode: 1, termination: .exit, stdout: Data(), stderr: Data("no server running on /private/tmp/does-not-exist-t3.sock\n".utf8)))
     _ = try await TmuxSnapshotLoader(runner: fake, executableURL: URL(fileURLWithPath: "/opt/homebrew/bin/tmux")).load(socketURL: socket)
     let calls = await fake.captured()
     let canonicalSocket = "/private/tmp/does-not-exist-t3.sock"
@@ -36,6 +36,22 @@ func nonzeroClassification() async {
     await #expect(throws: TmuxFailure.self) { try await TmuxSnapshotLoader(runner: partial).load(socketURL: socket) }
 }
 
+@Test("no-server diagnostic must exactly name the canonical requested socket")
+func exactNoServerDiagnostic() async {
+    let socket = URL(fileURLWithPath: "/tmp/missing-t3-exact.sock")
+    let nearMisses = [
+        "no server running on /private/tmp/other.sock\n",
+        "prefix no server running on /private/tmp/missing-t3-exact.sock suffix\n",
+        "error connecting to /private/tmp/missing-t3-exact.sock (Permission denied)\n"
+    ]
+    for message in nearMisses {
+        let fake = FakeRunner(.init(exitCode: 1, termination: .exit, stdout: Data(), stderr: Data(message.utf8)))
+        do { _ = try await TmuxSnapshotLoader(runner: fake).load(socketURL: socket); Issue.record("near miss mapped to noServer") }
+        catch let TmuxFailure.commandFailed(code, stderr) { #expect(code == 1); #expect(stderr == message) }
+        catch { Issue.record("unexpected error \(error)") }
+    }
+}
+
 @Test("default resolver ignores inherited TMUX")
 func resolverIgnoresTMUX() throws {
     let a = try DefaultTmuxEndpointResolver.resolve(environment: ["TMUX": "/evil,1,0"], userID: 501)
@@ -55,4 +71,29 @@ func runnerCancellation() async {
     let task=Task { try await ProcessTmuxCommandRunner().run(.init(executableURL:URL(fileURLWithPath:"/bin/sleep"),arguments:["2"],deadline:.seconds(5))) }
     try? await Task.sleep(for:.milliseconds(30)); task.cancel()
     await #expect(throws: TmuxFailure.cancelled) { try await task.value }
+}
+
+@Test("runner output limit wins before deadline")
+func runnerOutputLimitIsImmediate() async {
+    let start=ContinuousClock.now
+    await #expect(throws: TmuxFailure.outputLimitExceeded) { try await ProcessTmuxCommandRunner().run(.init(executableURL:URL(fileURLWithPath:"/usr/bin/yes"),arguments:[],deadline:.seconds(5),stdoutLimit:32)) }
+    #expect(start.duration(to:.now) < .seconds(1))
+}
+
+@Test("parallel cancellation is not queued behind an inherited-pipe timeout")
+func parallelRunsDoNotQueue() async {
+    let runner=ProcessTmuxCommandRunner()
+    let holder=Task { try await runner.run(.init(executableURL:URL(fileURLWithPath:"/bin/sh"),arguments:["-c","sleep 5 & exit 0"],deadline:.milliseconds(50))) }
+    let cancelled=Task { try await runner.run(.init(executableURL:URL(fileURLWithPath:"/bin/sleep"),arguments:["5"],deadline:.seconds(5))) }
+    try? await Task.sleep(for:.milliseconds(20)); let start=ContinuousClock.now; cancelled.cancel()
+    await #expect(throws: TmuxFailure.cancelled) { try await cancelled.value }
+    #expect(start.duration(to:.now) < .seconds(1))
+    _ = try? await holder.value
+}
+
+@Test("inherited-pipe child cannot hold runner completion open")
+func inheritedPipeChildIsBounded() async throws {
+    let start=ContinuousClock.now
+    _ = try await ProcessTmuxCommandRunner().run(.init(executableURL:URL(fileURLWithPath:"/bin/sh"),arguments:["-c","sleep 5 & exit 0"],deadline:.milliseconds(50)))
+    #expect(start.duration(to:.now) < .seconds(1))
 }
