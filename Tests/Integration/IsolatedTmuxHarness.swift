@@ -4,6 +4,11 @@ import Testing
 @testable import TmuxRoomsCore
 
 final class IsolatedTmuxHarness: @unchecked Sendable {
+    final class PTYClient: @unchecked Sendable {
+        fileprivate let process: Process
+        fileprivate init(process: Process) { self.process = process }
+    }
+
     let tmux=URL(fileURLWithPath:"/opt/homebrew/bin/tmux")
     let root:URL
     let socket:URL
@@ -32,9 +37,13 @@ final class IsolatedTmuxHarness: @unchecked Sendable {
         return try await ProcessTmuxCommandRunner().run(.init(executableURL:tmux,arguments:argv,deadline:deadline))
     }
 
+    func localCommand(_ args:[String], deadline:Duration = .seconds(2)) async throws -> TmuxCommandOutput {
+        try await ProcessTmuxCommandRunner().run(.init(executableURL:tmux, arguments:args, deadline:deadline))
+    }
+
     func startAttachedClients(session:String) throws {
-        try startScriptClient(session:session,readOnly:false)
-        try startScriptClient(session:session,readOnly:true)
+        _ = try startScriptClient(session:session,readOnly:false)
+        _ = try startScriptClient(session:session,readOnly:true)
         let p=Process(), input=Pipe(), output=Pipe(), error=Pipe()
         p.executableURL=tmux;p.arguments=["-S",socket.path,"-f","/dev/null","-C","attach-session","-t",session]
         p.standardInput=input;p.standardOutput=output;p.standardError=error
@@ -42,11 +51,41 @@ final class IsolatedTmuxHarness: @unchecked Sendable {
         drain(output.fileHandleForReading);drain(error.fileHandleForReading)
     }
 
+
+    func startPTYClient(arguments:[String]) throws -> PTYClient {
+        try startScriptClient(arguments:arguments)
+    }
+
+    func stopClient(_ client:PTYClient) {
+        let process=client.process
+        if process.isRunning { process.terminate() }
+        wait(process,limit:.seconds(1))
+        if process.isRunning { Darwin.kill(process.processIdentifier,SIGKILL);wait(process,limit:.seconds(1)) }
+    }
+
+    func waitForExit(_ client:PTYClient) async throws {
+        let deadline=ContinuousClock.now.advanced(by:.seconds(3))
+        while client.process.isRunning && ContinuousClock.now < deadline { try await Task.sleep(for:.milliseconds(20)) }
+        guard !client.process.isRunning else { throw TmuxFailure.timedOut }
+    }
+
+    func socketIdentity() throws -> (device:UInt64,inode:UInt64) {
+        var info=stat()
+        guard lstat(socket.path,&info)==0 else { throw POSIXError(.ENOENT) }
+        return (UInt64(info.st_dev),UInt64(info.st_ino))
+    }
+
+    func waitUntilNextUnixSecond(after value:Int64) async throws {
+        let deadline=ContinuousClock.now.advanced(by:.seconds(3))
+        while Int64(Date().timeIntervalSince1970) <= value && ContinuousClock.now < deadline { try await Task.sleep(for:.milliseconds(20)) }
+        guard Int64(Date().timeIntervalSince1970) > value else { throw TmuxFailure.timedOut }
+    }
+
     func waitForClients(_ count:Int) async throws -> RoomSnapshot {
         let deadline=ContinuousClock.now.advanced(by:.seconds(3))
         while ContinuousClock.now < deadline {
             let snapshot=try await TmuxSnapshotLoader(executableURL:tmux).load(socketURL:socket)
-            if snapshot.rooms.first?.clients.count == count{return snapshot}
+            if snapshot.rooms.reduce(0,{ $0 + $1.clients.count }) == count{return snapshot}
             try await Task.sleep(for:.milliseconds(30))
         }
         throw TmuxFailure.timedOut
@@ -58,15 +97,21 @@ final class IsolatedTmuxHarness: @unchecked Sendable {
         _=try? await command(["start-server",";","set-option","-g","exit-empty","off"])
     }
 
-    private func startScriptClient(session:String,readOnly:Bool)throws{
+    private func startScriptClient(session:String,readOnly:Bool)throws -> PTYClient {
+        var arguments=["attach-session"]
+        if readOnly { arguments.append("-r") }
+        arguments += ["-t",session]
+        return try startScriptClient(arguments:arguments)
+    }
+
+    private func startScriptClient(arguments:[String])throws -> PTYClient {
         let p=Process(),output=Pipe(),error=Pipe()
         p.executableURL=URL(fileURLWithPath:"/usr/bin/script")
         p.environment=ProcessInfo.processInfo.environment.merging(["TERM":"xterm-256color"]){_,new in new}
-        var args=["-q","/dev/null",tmux.path,"-S",socket.path,"-f","/dev/null","attach-session"]
-        if readOnly{args.append("-r")};args += ["-t",session]
-        let input=Pipe();p.arguments=args;p.standardInput=input;p.standardOutput=output;p.standardError=error
+        let input=Pipe();p.arguments=["-q","/dev/null",tmux.path,"-S",socket.path,"-f","/dev/null"]+arguments;p.standardInput=input;p.standardOutput=output;p.standardError=error
         try p.run();lock.withLock{children.append(p);retainedPipes += [input,output,error]}
         drain(output.fileHandleForReading);drain(error.fileHandleForReading)
+        return PTYClient(process:p)
     }
     private func drain(_ handle:FileHandle){handle.readabilityHandler={ h in _=try? h.read(upToCount:64*1024)}}
 
