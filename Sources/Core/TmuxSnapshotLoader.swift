@@ -32,7 +32,7 @@ public struct TmuxSnapshotLoader: TmuxSnapshotLoading, Sendable {
         let identity=ServerIdentity(canonicalSocketPath:canonical.path,socketDevice:before.device,socketInode:before.inode,serverPID:raw.boundary.serverPID,startedAtUnixSeconds:raw.boundary.startedAtUnixSeconds)
         return try raw.bind(server:identity)
     }
-    private func canonicalSocket(_ url:URL)->URL { let parent=URL(fileURLWithPath:canonicalExistingPath(url.deletingLastPathComponent().path),isDirectory:true); return parent.appending(path:url.lastPathComponent).standardizedFileURL }
+    private func canonicalSocket(_ url:URL)->URL { URL(fileURLWithPath:canonicalTmuxSocketPath(url.path)) }
     private struct Endpoint:Equatable { let device:UInt64; let inode:UInt64 }
     private func endpoint(_ url:URL)throws->Endpoint? { var s=stat(); if lstat(url.path,&s)==0 { guard (s.st_mode & S_IFMT) == S_IFSOCK else { throw TmuxFailure.endpointChanged }; return Endpoint(device:UInt64(s.st_dev),inode:UInt64(s.st_ino)) }; if errno==ENOENT || errno==ENOTDIR{return nil}; if errno==EACCES{throw TmuxFailure.endpointPermissionDenied}; throw TmuxFailure.launchFailed(String(cString:strerror(errno))) }
     private func expectedNoServer(_ data:Data,path:String)->Bool {
@@ -42,4 +42,9 @@ public struct TmuxSnapshotLoader: TmuxSnapshotLoading, Sendable {
     }
 }
 
+func canonicalTmuxSocketPath(_ path:String)->String {
+    let url=URL(fileURLWithPath:path)
+    let parent=URL(fileURLWithPath:canonicalExistingPath(url.deletingLastPathComponent().path),isDirectory:true)
+    return parent.appending(path:url.lastPathComponent).path
+}
 private func canonicalExistingPath(_ path:String)->String { guard let pointer=realpath(path,nil) else { return URL(fileURLWithPath:path).standardizedFileURL.path }; defer{free(pointer)}; return String(cString:pointer) }

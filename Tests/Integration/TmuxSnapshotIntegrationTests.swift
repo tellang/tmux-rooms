@@ -19,6 +19,20 @@ struct TmuxSnapshotIntegrationTests {
             #expect(snapshot.server != nil);#expect(snapshot.rooms.isEmpty)
         }
     }
+    @Test("realpath spelling remains stable for a server started through /private/tmp")
+    func privateTmpSocketSpelling() async throws {
+        try await IsolatedTmuxHarness.withHarness { h in
+            let privateSocket = URL(fileURLWithPath: "/private\(h.socket.path)")
+            let started = try await ProcessTmuxCommandRunner().run(.init(
+                executableURL: h.tmux,
+                arguments: ["-S", privateSocket.path, "-f", "/dev/null", "start-server", ";", "set-option", "-g", "exit-empty", "off"]
+            ))
+            #expect(started.exitCode == 0)
+            let snapshot = try await TmuxSnapshotLoader(executableURL: h.tmux).load(socketURL: privateSocket)
+            #expect(snapshot.server?.canonicalSocketPath == privateSocket.path)
+            #expect(snapshot.rooms.isEmpty)
+        }
+    }
     @Test("one and two detached sessions inventory panes and unicode names")
     func populated() async throws {
         try await IsolatedTmuxHarness.withHarness { h in

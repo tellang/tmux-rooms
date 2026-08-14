@@ -64,7 +64,7 @@ struct RawTmuxPane:Sendable,Hashable{let sessionID:String;let windowID:String;le
 struct RawTmuxSnapshot:Sendable,Hashable{
     let boundary:RawTmuxBoundary;let sessions:[RawTmuxSession];let clients:[RawTmuxClient];let panes:[RawTmuxPane]
     func bind(server:ServerIdentity)throws->RoomSnapshot{
-        guard server.socketDevice != 0,server.socketInode != 0,boundary.socketPath==server.canonicalSocketPath,boundary.serverPID==server.serverPID,boundary.startedAtUnixSeconds==server.startedAtUnixSeconds else{throw TmuxFailure.endpointChanged}
+        guard server.socketDevice != 0,server.socketInode != 0,canonicalTmuxSocketPath(boundary.socketPath)==canonicalTmuxSocketPath(server.canonicalSocketPath),boundary.serverPID==server.serverPID,boundary.startedAtUnixSeconds==server.startedAtUnixSeconds else{throw TmuxFailure.endpointChanged}
         var clientsBySession:[String:[RawTmuxClient]]=[:],panesBySession:[String:[RawTmuxPane]]=[:]
         for client in clients{clientsBySession[client.sessionID,default:[]].append(client)}
         for pane in panes{panesBySession[pane.sessionID,default:[]].append(pane)}

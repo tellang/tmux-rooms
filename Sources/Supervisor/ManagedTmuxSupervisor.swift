@@ -225,7 +225,7 @@ public final class ManagedTmuxSupervisor: @unchecked Sendable {
 
     public static func initialAttachArguments(_ configuration: ManagedSupervisorConfiguration) -> [String] {
         let token = configuration.destination
-        let condition = "#{&&:#{==:#{socket_path},\(token.server.canonicalSocketPath)},#{==:#{pid},\(token.server.serverPID)},#{==:#{start_time},\(token.server.startedAtUnixSeconds)},#{m:*1*,#{S:#{?#{&&:#{==:#{session_id},\(token.sessionID)},#{==:#{session_created},\(token.createdAtUnixSeconds)}},1,}}}}"
+        let condition = "#{&&:#{==:#{pid},\(token.server.serverPID)},#{==:#{start_time},\(token.server.startedAtUnixSeconds)},#{m:*1*,#{S:#{?#{&&:#{==:#{session_id},\(token.sessionID)},#{==:#{session_created},\(token.createdAtUnixSeconds)}},1,}}}}"
         var attach = "attach-session"
         if configuration.readOnly { attach += " -r" }
         attach += " -t '\(token.sessionID)'"
