@@ -91,6 +91,7 @@ public enum ManagedTerminalOutcome: Sendable, Equatable {
     case ready(ManagedClientRecord)
     case pending(ManagedClientRecord)
     case failed(ManagedClientRecord)
+    case ambiguous([ManagedClientRecord])
 }
 
 public enum TerminalFocusResult: Sendable, Equatable {

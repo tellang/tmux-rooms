@@ -76,6 +76,56 @@ func ownershipMismatchFailsClosed() async throws {
     }
 }
 
+@Test("reusable role conflicts and unresolved records fail closed without side effects")
+@MainActor
+func reusableRoleConflictFailsClosed() async throws {
+    enum Expected { case ambiguous, pending, failed }
+    let cases: [([ManagedClientRecord], Expected)] = [
+        ([roleRecord(state: .ambiguous), roleRecord(state: .ambiguous)], .ambiguous),
+        ([roleRecord(state: .complete), roleRecord(state: .complete)], .ambiguous),
+        ([roleRecord(state: .ambiguous, liveKey: managedKey)], .ambiguous),
+        ([roleRecord(state: .launching), roleRecord(state: .complete)], .ambiguous),
+        ([roleRecord(state: .timedOutButRunning)], .pending),
+        ([roleRecord(state: .failed)], .failed),
+        ([roleRecord(state: .complete, liveKey: ClientKey(server: managedServer, clientName: "stale", tty: managedReference.tty, clientPID: 99, createdAtUnixSeconds: 99))], .failed)
+    ]
+
+    for (seed, expected) in cases {
+        let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+        for record in seed { try journal.write(record) }
+        let fake = FakeManagedAutomation(evidence: seed.map { .init(terminal: managedReference, nonce: $0.nonce) })
+        let supervisor = FakeSupervisorClient()
+        let outcome = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
+            .ensureManaged(role: .primary, destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .milliseconds(10))
+        switch (expected, outcome) {
+        case (.ambiguous, .ambiguous), (.pending, .pending), (.failed, .failed): break
+        default: Issue.record("unexpected fail-closed outcome: \(outcome)")
+        }
+        #expect(fake.createCalls == 0)
+        #expect(await supervisor.count == 0)
+        let after = try journal.reusableRecords(role: .primary)
+        #expect(after.count == seed.count)
+        #expect(Set(after.map(\.nonce)) == Set(seed.map(\.nonce)))
+    }
+}
+
+@Test("initial empty reusable role launches exactly once")
+@MainActor
+func initialReusableRoleLaunchesOnce() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let fake = FakeManagedAutomation()
+    let supervisor = FakeSupervisorClient()
+    _ = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
+        .ensureManaged(role: .primary, destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .seconds(1))
+    #expect(fake.createCalls == 1)
+    #expect(await supervisor.count == 0)
+    #expect(try journal.reusableRecords(role: .primary).count == 1)
+}
+
+private func roleRecord(state: ManagedRecordState, liveKey: ClientKey? = nil) -> ManagedClientRecord {
+    ManagedClientRecord(nonce: ManagedNonce.generate(), launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .written, state: state, terminal: managedReference, liveClientKey: liveKey)
+}
+
 @Test("provisional config and handshake recovery survive journal reconstruction")
 @MainActor
 func crashBoundaryRecovery() async throws {

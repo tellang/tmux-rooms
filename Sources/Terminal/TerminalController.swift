@@ -23,26 +23,36 @@ public final class TerminalController: TerminalControlling {
 
     public func ensureManaged(role: ManagedRole, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration = .seconds(5)) async throws -> ManagedTerminalOutcome {
         let readOnly = role == .preview ? true : readOnly
-        if try journal.reusable(role: role) != nil { _ = try await reconcile(snapshot: snapshot) }
-        if let existing = try journal.reusable(role: role) {
-            if [.launching, .timedOutButRunning, .completedNeedsReconcile, .provisional].contains(existing.state) { return .pending(existing) }
-            if existing.requestedSessionToken == destination, existing.readOnly == readOnly,
-               let key = existing.liveClientKey, snapshot.rooms.flatMap(\.clients).contains(where: { $0.key == key }) { return .ready(existing) }
-            if existing.state == .complete || existing.state == .recovered {
-                let request = ManagedSupervisorRequest(nonce: existing.nonce, action: .switchSession(destination, readOnly: readOnly))
-                let response = try await supervisorClient.send(request, deadline: .seconds(3))
-                guard response.status == .completed else { throw ManagedTerminalError.staleOwnership }
-                var switched = existing
-                switched.requestedSessionToken = destination; switched.readOnly = readOnly; switched.childPID = response.childPID
-                switched.liveClientKey = nil; switched.requestID = request.id; switched.state = .completedNeedsReconcile; switched.updatedAt = Date()
-                try journal.write(switched)
-                let evidence: [ManagedSessionEvidence]
-                switch await automation.enumerateManagedSessions() { case let .success(value): evidence = value; case let .failure(error): throw ManagedTerminalError.automation(error) }
-                let resolved = try reconcile(switched, evidence: evidence, snapshot: snapshot)
-                return resolved.state == .complete || resolved.state == .recovered ? .ready(resolved) : .pending(resolved)
-            }
+        var candidates = try journal.reusableRecords(role: role)
+        guard !candidates.isEmpty else {
+            return try await launch(kind: .reusableRole, role: role, destination: destination, readOnly: readOnly, snapshot: snapshot, deadline: softDeadline)
         }
-        return try await launch(kind: .reusableRole, role: role, destination: destination, readOnly: readOnly, snapshot: snapshot, deadline: softDeadline)
+        if candidates.count > 1 || candidates.contains(where: { $0.state == .ambiguous }) { return .ambiguous(candidates) }
+        guard let candidate = candidates.first else { throw ManagedTerminalError.invalidRecord }
+        if [.launching, .timedOutButRunning, .completedNeedsReconcile, .provisional].contains(candidate.state) { return .pending(candidate) }
+        if candidate.state == .failed { return .failed(candidate) }
+
+        guard candidate.state == .complete || candidate.state == .recovered else { return .failed(candidate) }
+        _ = try await reconcile(snapshot: snapshot)
+        candidates = try journal.reusableRecords(role: role)
+        guard candidates.count == 1, let existing = candidates.first else { return .ambiguous(candidates) }
+        if existing.state == .ambiguous { return .ambiguous(candidates) }
+        if existing.state == .failed { return .failed(existing) }
+        guard existing.state == .complete || existing.state == .recovered else { return .pending(existing) }
+
+        if existing.requestedSessionToken == destination, existing.readOnly == readOnly,
+           let key = existing.liveClientKey, snapshot.rooms.flatMap(\.clients).contains(where: { $0.key == key }) { return .ready(existing) }
+        let request = ManagedSupervisorRequest(nonce: existing.nonce, action: .switchSession(destination, readOnly: readOnly))
+        let response = try await supervisorClient.send(request, deadline: .seconds(3))
+        guard response.status == .completed else { throw ManagedTerminalError.staleOwnership }
+        var switched = existing
+        switched.requestedSessionToken = destination; switched.readOnly = readOnly; switched.childPID = response.childPID
+        switched.liveClientKey = nil; switched.requestID = request.id; switched.state = .completedNeedsReconcile; switched.updatedAt = Date()
+        try journal.write(switched)
+        let evidence: [ManagedSessionEvidence]
+        switch await automation.enumerateManagedSessions() { case let .success(value): evidence = value; case let .failure(error): throw ManagedTerminalError.automation(error) }
+        let resolved = try reconcile(switched, evidence: evidence, snapshot: snapshot)
+        return resolved.state == .complete || resolved.state == .recovered ? .ready(resolved) : .pending(resolved)
     }
 
     public func launchDuplicate(destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration = .seconds(5)) async throws -> ManagedTerminalOutcome {
@@ -152,6 +162,7 @@ public final class TerminalController: TerminalControlling {
         guard exact.count == 1 else {
             if exact.count > 1 { record.state = .ambiguous; record.updatedAt = Date(); try journal.write(record) }
             else if record.state == .provisional || record.state == .launching { record.state = .completedNeedsReconcile; record.updatedAt = Date(); try journal.write(record) }
+            else if record.state == .complete || record.state == .recovered { record.state = .failed; record.updatedAt = Date(); try journal.write(record) }
             return record
         }
         record.liveClientKey = exact[0].key

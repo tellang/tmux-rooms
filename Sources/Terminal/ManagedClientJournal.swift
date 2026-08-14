@@ -38,9 +38,12 @@ public struct ManagedClientJournal: Sendable {
             .compactMap { try? decoder.decode(ManagedClientRecord.self, from: Data(contentsOf: $0)) }
     }
 
-    public func reusable(role: ManagedRole) throws -> ManagedClientRecord? {
+    public func reusableRecords(role: ManagedRole) throws -> [ManagedClientRecord] {
         try allRecords().filter { $0.launchKind == .reusableRole && $0.role == role }
-            .max { $0.updatedAt < $1.updatedAt }
+            .sorted { lhs, rhs in
+                if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+                return lhs.nonce < rhs.nonce
+            }
     }
 
     public func writeConfiguration(_ configuration: ManagedSupervisorConfiguration) throws {
