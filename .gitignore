@@ -1,0 +1,12 @@
+.DS_Store
+.build/
+build/
+DerivedData*/
+*.xcresult
+*.profraw
+*.xccheckout
+*.xcuserstate
+xcuserdata/
+TmuxRooms.xcodeproj/project.xcworkspace/xcuserdata/
+TmuxRooms.xcodeproj/xcuserdata/
+.omx/

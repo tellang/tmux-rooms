@@ -1,0 +1,146 @@
+name: TmuxRooms
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  TmuxRoomsCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - Sources/Core
+      - Sources/Terminal
+    settings:
+      base:
+        PRODUCT_NAME: TmuxRoomsCore
+
+  tmuxrooms-launch:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/Launcher
+    settings:
+      base:
+        PRODUCT_NAME: tmuxrooms-launch
+        EXECUTABLE_NAME: tmuxrooms-launch
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+
+  TmuxRooms:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/App
+    dependencies:
+      - target: TmuxRoomsCore
+      - target: tmuxrooms-launch
+    entitlements:
+      path: Sources/App/TmuxRooms.entitlements
+      properties:
+        com.apple.security.automation.apple-events: true
+    info:
+      path: Sources/App/Info.plist
+      properties:
+        CFBundleDisplayName: Tmux Rooms
+        CFBundleName: Tmux Rooms
+        LSUIElement: true
+        NSAppleEventsUsageDescription: Tmux Rooms uses Apple Events to select and focus the exact iTerm tab that owns a verified tmux client.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tellang.tmuxrooms
+        PRODUCT_NAME: Tmux Rooms
+        EXECUTABLE_NAME: TmuxRooms
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Sources/App/TmuxRooms.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+    postBuildScripts:
+      - name: Embed tmuxrooms-launch
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(BUILT_PRODUCTS_DIR)/tmuxrooms-launch
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/tmuxrooms-launch
+        script: |
+          set -euo pipefail
+          helper_dir="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers"
+          helper_path="${helper_dir}/tmuxrooms-launch"
+          mkdir -p "${helper_dir}"
+          /usr/bin/ditto "${BUILT_PRODUCTS_DIR}/tmuxrooms-launch" "${helper_path}"
+          chmod 755 "${helper_path}"
+          /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --options runtime --timestamp=none "${helper_path}"
+
+  TmuxRoomsTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/Core
+      - Tests/Terminal
+      - Tests/Integration
+      - Tests/Performance
+    dependencies:
+      - target: TmuxRoomsCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tellang.tmuxrooms.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+
+  TmuxRoomsUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - Tests/UI
+    dependencies:
+      - target: TmuxRooms
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tellang.tmuxrooms.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+schemes:
+  TmuxRooms:
+    build:
+      targets:
+        TmuxRooms: all
+        TmuxRoomsCore: [test]
+        tmuxrooms-launch: [run]
+        TmuxRoomsTests: [test]
+        TmuxRoomsUITests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - TmuxRoomsTests
+        - TmuxRoomsUITests
+  TmuxRoomsUnitTests:
+    build:
+      targets:
+        TmuxRoomsTests: [test]
+    test:
+      targets:
+        - TmuxRoomsTests
+  TmuxRoomsUITests:
+    build:
+      targets:
+        TmuxRoomsUITests: [test]
+    test:
+      targets:
+        - TmuxRoomsUITests

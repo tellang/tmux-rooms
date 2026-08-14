@@ -1,0 +1,843 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0281886B8DE2F4B8EE517096 /* TerminalPlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E88B712848F51D1D6B88A403 /* TerminalPlaceholderTests.swift */; };
+		127ECE9E8A46BB54B7E24BA5 /* BootstrapPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A4C32246841CEBB210DEFF /* BootstrapPerformanceTests.swift */; };
+		27A71F7B659DD315E40C30EF /* libTmuxRoomsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */; };
+		45026E95F586998DF0D6A575 /* TerminalScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C86491329A9BB9FA0A7D1A6 /* TerminalScaffold.swift */; };
+		4641DD2EE3411406F6FE8D04 /* BootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896E6C3367F410B8BF152135 /* BootstrapTests.swift */; };
+		50866E95CB93902BFC8F71E2 /* libTmuxRoomsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */; };
+		B152D4ACA6DEC160ED87C8E7 /* tmuxrooms-launch in Resources */ = {isa = PBXBuildFile; fileRef = 10A8EC266806C921196CDFA6 /* tmuxrooms-launch */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C1420C57C134B593476D09C4 /* TmuxRoomsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */; };
+		D08288034A47656EE1A291A0 /* TmuxRoomsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */; };
+		D159FC60A8F12221CA74EDA7 /* LauncherContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0134174FF8882E44AC6DC21E /* LauncherContractTests.swift */; };
+		D36512B4D9213FB4C30CDCDF /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC7BBAFAFC9B1680D06975B /* main.swift */; };
+		F25BCCD18F5D365E0FFCA9F9 /* TmuxRoomsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F09FADAC04D65B16C1C73C62 /* TmuxRoomsCore.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0E82463A6F956BA3364DBC83 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 075E859CCF0D96F23A927B2A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AEA393D8CD4E3E458CF24520;
+			remoteInfo = "tmuxrooms-launch";
+		};
+		5C65C80C78A00B238BAF0387 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 075E859CCF0D96F23A927B2A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3610084F112D23586B4D6F6B;
+			remoteInfo = TmuxRoomsCore;
+		};
+		6CCF77FCAA5A6E2349A3B8AC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 075E859CCF0D96F23A927B2A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 99F8F11A2A0C66B8F9E21C21;
+			remoteInfo = TmuxRooms;
+		};
+		9405A9A025DFD3F79C11546A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 075E859CCF0D96F23A927B2A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3610084F112D23586B4D6F6B;
+			remoteInfo = TmuxRoomsCore;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0134174FF8882E44AC6DC21E /* LauncherContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherContractTests.swift; sourceTree = "<group>"; };
+		0A62498B6D0C9A790464D486 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		0C86491329A9BB9FA0A7D1A6 /* TerminalScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScaffold.swift; sourceTree = "<group>"; };
+		10A8EC266806C921196CDFA6 /* tmuxrooms-launch */ = {isa = PBXFileReference; includeInIndex = 0; path = "tmuxrooms-launch"; sourceTree = BUILT_PRODUCTS_DIR; };
+		24601962A482F968D4972240 /* TmuxRooms.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TmuxRooms.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsApp.swift; sourceTree = "<group>"; };
+		3F7EFE0FE2F3D793574C13C7 /* TmuxRooms.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TmuxRooms.entitlements; sourceTree = "<group>"; };
+		5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsUITests.swift; sourceTree = "<group>"; };
+		7F41395579C228E50D22609C /* libTmuxRoomsCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libTmuxRoomsCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		896E6C3367F410B8BF152135 /* BootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapTests.swift; sourceTree = "<group>"; };
+		8DC7BBAFAFC9B1680D06975B /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		A4A4C32246841CEBB210DEFF /* BootstrapPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapPerformanceTests.swift; sourceTree = "<group>"; };
+		C1724FB192CFBF5916985A13 /* TmuxRoomsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TmuxRoomsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D39442D00FD7AC9712271B6F /* TmuxRoomsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TmuxRoomsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E88B712848F51D1D6B88A403 /* TerminalPlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPlaceholderTests.swift; sourceTree = "<group>"; };
+		F09FADAC04D65B16C1C73C62 /* TmuxRoomsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsCore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		25474AFA1268A431809B5FDF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				27A71F7B659DD315E40C30EF /* libTmuxRoomsCore.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EBABCC03399770CE24F4A9F7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				50866E95CB93902BFC8F71E2 /* libTmuxRoomsCore.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0DFCCCBD300F0032D02632A6 /* Terminal */ = {
+			isa = PBXGroup;
+			children = (
+				E88B712848F51D1D6B88A403 /* TerminalPlaceholderTests.swift */,
+			);
+			path = Terminal;
+			sourceTree = "<group>";
+		};
+		3A645731877BD06E712B335F /* Terminal */ = {
+			isa = PBXGroup;
+			children = (
+				0C86491329A9BB9FA0A7D1A6 /* TerminalScaffold.swift */,
+			);
+			path = Terminal;
+			sourceTree = "<group>";
+		};
+		48FA66A2D623BB7C36298AD5 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		53EC36036FE69D31CCAE2806 = {
+			isa = PBXGroup;
+			children = (
+				694DD150DFCBC6DBB5629514 /* Sources */,
+				FFA052F61CF56309EE9011CA /* Tests */,
+				9ADED508A41FCDB82395A9C0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5CF72EE635AB52D241899D04 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				0A62498B6D0C9A790464D486 /* Info.plist */,
+				3F7EFE0FE2F3D793574C13C7 /* TmuxRooms.entitlements */,
+				361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		694DD150DFCBC6DBB5629514 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				5CF72EE635AB52D241899D04 /* App */,
+				CB307E08BEBFE1834B3FA2A7 /* Core */,
+				8DBBD766395D0EB08EF08AA9 /* Launcher */,
+				3A645731877BD06E712B335F /* Terminal */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		7E1569ECAF2A226F1B401066 /* Performance */ = {
+			isa = PBXGroup;
+			children = (
+				A4A4C32246841CEBB210DEFF /* BootstrapPerformanceTests.swift */,
+			);
+			path = Performance;
+			sourceTree = "<group>";
+		};
+		80EFE3D15C1994330EA126F8 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				896E6C3367F410B8BF152135 /* BootstrapTests.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		8DBBD766395D0EB08EF08AA9 /* Launcher */ = {
+			isa = PBXGroup;
+			children = (
+				8DC7BBAFAFC9B1680D06975B /* main.swift */,
+			);
+			path = Launcher;
+			sourceTree = "<group>";
+		};
+		9ADED508A41FCDB82395A9C0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7F41395579C228E50D22609C /* libTmuxRoomsCore.a */,
+				10A8EC266806C921196CDFA6 /* tmuxrooms-launch */,
+				24601962A482F968D4972240 /* TmuxRooms.app */,
+				C1724FB192CFBF5916985A13 /* TmuxRoomsTests.xctest */,
+				D39442D00FD7AC9712271B6F /* TmuxRoomsUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		CB307E08BEBFE1834B3FA2A7 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				F09FADAC04D65B16C1C73C62 /* TmuxRoomsCore.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		D44AA099C2467D379998D946 /* Integration */ = {
+			isa = PBXGroup;
+			children = (
+				0134174FF8882E44AC6DC21E /* LauncherContractTests.swift */,
+			);
+			path = Integration;
+			sourceTree = "<group>";
+		};
+		FFA052F61CF56309EE9011CA /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				80EFE3D15C1994330EA126F8 /* Core */,
+				D44AA099C2467D379998D946 /* Integration */,
+				7E1569ECAF2A226F1B401066 /* Performance */,
+				0DFCCCBD300F0032D02632A6 /* Terminal */,
+				48FA66A2D623BB7C36298AD5 /* UI */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		16ED5918C3668A4C77224529 /* TmuxRoomsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C501ECF6F0FDBEBBD3702257 /* Build configuration list for PBXNativeTarget "TmuxRoomsTests" */;
+			buildPhases = (
+				C8D816EF5A76E1AAEEF966AC /* Sources */,
+				25474AFA1268A431809B5FDF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1558288ADDF83B6ADAD37D90 /* PBXTargetDependency */,
+			);
+			name = TmuxRoomsTests;
+			packageProductDependencies = (
+			);
+			productName = TmuxRoomsTests;
+			productReference = C1724FB192CFBF5916985A13 /* TmuxRoomsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		3610084F112D23586B4D6F6B /* TmuxRoomsCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DBAE0CE3C77DCF23E9469938 /* Build configuration list for PBXNativeTarget "TmuxRoomsCore" */;
+			buildPhases = (
+				BE35A4E6B31315A36D7D585E /* Sources */,
+				51098B6A04BD42282E6C9D4A /* Copy Swift Objective-C Interface Header */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TmuxRoomsCore;
+			packageProductDependencies = (
+			);
+			productName = TmuxRoomsCore;
+			productReference = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+		99F8F11A2A0C66B8F9E21C21 /* TmuxRooms */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BA5864D609E74F20D9B2C264 /* Build configuration list for PBXNativeTarget "TmuxRooms" */;
+			buildPhases = (
+				30207EF0897CDA29EAC1CB9C /* Sources */,
+				CCBAB964A44EF30D3103CA6E /* Resources */,
+				EBABCC03399770CE24F4A9F7 /* Frameworks */,
+				1691C380A1E98A9325282A3C /* Embed tmuxrooms-launch */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				880D487FFD4BC2916B1D62B1 /* PBXTargetDependency */,
+				38960809809ED276E9A06530 /* PBXTargetDependency */,
+			);
+			name = TmuxRooms;
+			packageProductDependencies = (
+			);
+			productName = TmuxRooms;
+			productReference = 24601962A482F968D4972240 /* TmuxRooms.app */;
+			productType = "com.apple.product-type.application";
+		};
+		AEA393D8CD4E3E458CF24520 /* tmuxrooms-launch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3931BFC0680770F3DEB68359 /* Build configuration list for PBXNativeTarget "tmuxrooms-launch" */;
+			buildPhases = (
+				F998489780D552DB58966FB4 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "tmuxrooms-launch";
+			packageProductDependencies = (
+			);
+			productName = "tmuxrooms-launch";
+			productReference = 10A8EC266806C921196CDFA6 /* tmuxrooms-launch */;
+			productType = "com.apple.product-type.tool";
+		};
+		D79C310CC7BB6D4D782719FE /* TmuxRoomsUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 99E2D442E417F04B222A9518 /* Build configuration list for PBXNativeTarget "TmuxRoomsUITests" */;
+			buildPhases = (
+				A123A4F59F1FA8A876C780AC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D310730802BAD4B3230500CC /* PBXTargetDependency */,
+			);
+			name = TmuxRoomsUITests;
+			packageProductDependencies = (
+			);
+			productName = TmuxRoomsUITests;
+			productReference = D39442D00FD7AC9712271B6F /* TmuxRoomsUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		075E859CCF0D96F23A927B2A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					D79C310CC7BB6D4D782719FE = {
+						TestTargetID = 99F8F11A2A0C66B8F9E21C21;
+					};
+				};
+			};
+			buildConfigurationList = 72DC890695B1BB048D247E50 /* Build configuration list for PBXProject "TmuxRooms" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 53EC36036FE69D31CCAE2806;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9ADED508A41FCDB82395A9C0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3610084F112D23586B4D6F6B /* TmuxRoomsCore */,
+				AEA393D8CD4E3E458CF24520 /* tmuxrooms-launch */,
+				99F8F11A2A0C66B8F9E21C21 /* TmuxRooms */,
+				16ED5918C3668A4C77224529 /* TmuxRoomsTests */,
+				D79C310CC7BB6D4D782719FE /* TmuxRoomsUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CCBAB964A44EF30D3103CA6E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B152D4ACA6DEC160ED87C8E7 /* tmuxrooms-launch in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1691C380A1E98A9325282A3C /* Embed tmuxrooms-launch */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/tmuxrooms-launch",
+			);
+			name = "Embed tmuxrooms-launch";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/tmuxrooms-launch",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nhelper_dir=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers\"\nhelper_path=\"${helper_dir}/tmuxrooms-launch\"\nmkdir -p \"${helper_dir}\"\n/usr/bin/ditto \"${BUILT_PRODUCTS_DIR}/tmuxrooms-launch\" \"${helper_path}\"\nchmod 755 \"${helper_path}\"\n/usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --options runtime --timestamp=none \"${helper_path}\"\n";
+		};
+		51098B6A04BD42282E6C9D4A /* Copy Swift Objective-C Interface Header */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(DERIVED_SOURCES_DIR)/$(SWIFT_OBJC_INTERFACE_HEADER_NAME)",
+			);
+			name = "Copy Swift Objective-C Interface Header";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/include/$(PRODUCT_MODULE_NAME)/$(SWIFT_OBJC_INTERFACE_HEADER_NAME)",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "ditto \"${SCRIPT_INPUT_FILE_0}\" \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		30207EF0897CDA29EAC1CB9C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C1420C57C134B593476D09C4 /* TmuxRoomsApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A123A4F59F1FA8A876C780AC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D08288034A47656EE1A291A0 /* TmuxRoomsUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BE35A4E6B31315A36D7D585E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				45026E95F586998DF0D6A575 /* TerminalScaffold.swift in Sources */,
+				F25BCCD18F5D365E0FFCA9F9 /* TmuxRoomsCore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C8D816EF5A76E1AAEEF966AC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				127ECE9E8A46BB54B7E24BA5 /* BootstrapPerformanceTests.swift in Sources */,
+				4641DD2EE3411406F6FE8D04 /* BootstrapTests.swift in Sources */,
+				D159FC60A8F12221CA74EDA7 /* LauncherContractTests.swift in Sources */,
+				0281886B8DE2F4B8EE517096 /* TerminalPlaceholderTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F998489780D552DB58966FB4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D36512B4D9213FB4C30CDCDF /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1558288ADDF83B6ADAD37D90 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3610084F112D23586B4D6F6B /* TmuxRoomsCore */;
+			targetProxy = 9405A9A025DFD3F79C11546A /* PBXContainerItemProxy */;
+		};
+		38960809809ED276E9A06530 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AEA393D8CD4E3E458CF24520 /* tmuxrooms-launch */;
+			targetProxy = 0E82463A6F956BA3364DBC83 /* PBXContainerItemProxy */;
+		};
+		880D487FFD4BC2916B1D62B1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3610084F112D23586B4D6F6B /* TmuxRoomsCore */;
+			targetProxy = 5C65C80C78A00B238BAF0387 /* PBXContainerItemProxy */;
+		};
+		D310730802BAD4B3230500CC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 99F8F11A2A0C66B8F9E21C21 /* TmuxRooms */;
+			targetProxy = 6CCF77FCAA5A6E2349A3B8AC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		044AF6B94F64EA98771574F6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tellang.tmuxrooms.tests;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		1D2D910F8179B45BAD247D72 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tellang.tmuxrooms.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = TmuxRooms;
+			};
+			name = Release;
+		};
+		2AA4B683FAD1A0EEE7418B5C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/App/TmuxRooms.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = TmuxRooms;
+				INFOPLIST_FILE = Sources/App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tellang.tmuxrooms;
+				PRODUCT_NAME = "Tmux Rooms";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		33C1D1F9F095EA749B1A4FD1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Tmux Rooms Local Development";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = "tmuxrooms-launch";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_NAME = "tmuxrooms-launch";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		4C369F679A8E3F1009CF261C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_NAME = TmuxRoomsCore;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		84E77E16FEF8B7CF69900B70 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tellang.tmuxrooms.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = TmuxRooms;
+			};
+			name = Debug;
+		};
+		86D968FCE884DFBE993C6AC1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		9EFCF83C0F534A27FA84B327 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tellang.tmuxrooms.tests;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		A471642A70B0236B51DFD2CA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/App/TmuxRooms.entitlements;
+				CODE_SIGN_IDENTITY = "Tmux Rooms Local Development";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = TmuxRooms;
+				INFOPLIST_FILE = Sources/App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tellang.tmuxrooms;
+				PRODUCT_NAME = "Tmux Rooms";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		B9E879D57571E296B0DB7A84 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_NAME = TmuxRoomsCore;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		D292957048E4F21103295705 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = "tmuxrooms-launch";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_NAME = "tmuxrooms-launch";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		DFE224DDDF2486BB0D6D9F36 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3931BFC0680770F3DEB68359 /* Build configuration list for PBXNativeTarget "tmuxrooms-launch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D292957048E4F21103295705 /* Debug */,
+				33C1D1F9F095EA749B1A4FD1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		72DC890695B1BB048D247E50 /* Build configuration list for PBXProject "TmuxRooms" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				86D968FCE884DFBE993C6AC1 /* Debug */,
+				DFE224DDDF2486BB0D6D9F36 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		99E2D442E417F04B222A9518 /* Build configuration list for PBXNativeTarget "TmuxRoomsUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				84E77E16FEF8B7CF69900B70 /* Debug */,
+				1D2D910F8179B45BAD247D72 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BA5864D609E74F20D9B2C264 /* Build configuration list for PBXNativeTarget "TmuxRooms" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AA4B683FAD1A0EEE7418B5C /* Debug */,
+				A471642A70B0236B51DFD2CA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C501ECF6F0FDBEBBD3702257 /* Build configuration list for PBXNativeTarget "TmuxRoomsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				044AF6B94F64EA98771574F6 /* Debug */,
+				9EFCF83C0F534A27FA84B327 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DBAE0CE3C77DCF23E9469938 /* Build configuration list for PBXNativeTarget "TmuxRoomsCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B9E879D57571E296B0DB7A84 /* Debug */,
+				4C369F679A8E3F1009CF261C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 075E859CCF0D96F23A927B2A /* Project object */;
+}
