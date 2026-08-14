@@ -34,6 +34,7 @@ enum UIFixture: String, CaseIterable {
     case deleteAttached = "v1-delete-attached"
     case longUnicode = "v1-long-unicode"
     case generalError = "v1-general-error"
+    case singleFlight = "v1-single-flight"
 
     @MainActor
     func makeStore() -> RoomsStore {
@@ -44,6 +45,7 @@ enum UIFixture: String, CaseIterable {
             issue: definition.issue,
             focusability: definition.focusability,
             fixtureDefaultFocusability: .focusable,
+            fixtureBlocksActions: definition.blocksActions,
             isFixture: true,
             handler: FixtureRoomActionHandler(snapshot: definition.snapshot)
         )
@@ -105,6 +107,8 @@ enum UIFixture: String, CaseIterable {
             return Definition(snapshot: Fixtures.snapshot([Fixtures.room(name: name, id: "$8")]))
         case .generalError:
             return Definition(snapshot: Fixtures.snapshot([basic]), issue: .generalFixture)
+        case .singleFlight:
+            return Definition(snapshot: Fixtures.snapshot([Fixtures.room(name: "single-flight", id: "$9")]), blocksActions: true)
         }
     }
 
@@ -113,6 +117,7 @@ enum UIFixture: String, CaseIterable {
         var phase: AppPhase = .idle
         var issue: AppIssue?
         var focusability: [ClientKey: ClientFocusability] = [:]
+        var blocksActions = false
     }
 }
 

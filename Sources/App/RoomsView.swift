@@ -15,6 +15,7 @@ private enum Palette {
 
 struct RoomsRootView: View {
     @ObservedObject var store: RoomsStore
+    @State private var fixtureKeyMonitor: Any?
 
     var body: some View {
         ZStack {
@@ -41,6 +42,8 @@ struct RoomsRootView: View {
         .preferredColorScheme(.dark)
         .animation(.easeOut(duration: 0.16), value: store.chooser?.id)
         .animation(.easeOut(duration: 0.16), value: store.deleteConfirmation?.id)
+        .onAppear { installFixtureKeyMonitorIfNeeded() }
+        .onDisappear { removeFixtureKeyMonitor() }
     }
 
     private var header: some View {
@@ -140,8 +143,27 @@ struct RoomsRootView: View {
                     Text(store.fixtureLastAction)
                         .lineLimit(1)
                         .accessibilityIdentifier("fixture.action.last")
+                    Text("\(store.fixtureMaxConcurrentActions)")
+                        .accessibilityLabel("Maximum concurrent actions \(store.fixtureMaxConcurrentActions)")
+                        .accessibilityIdentifier("fixture.action.max-concurrent")
                 }
                 .font(.custom("SF Mono Medium", size: 10))
+                if store.fixtureActionPending {
+                    HStack {
+                        Text("pending")
+                            .accessibilityIdentifier("fixture.action.pending")
+                        Spacer()
+                        Button("Complete fixture action") { store.completeFixtureAction() }
+                            .buttonStyle(QuietButtonStyle())
+                            .accessibilityIdentifier("fixture.action.complete")
+                    }
+                    .font(.custom("SF Mono Medium", size: 10))
+                } else {
+                    Text("idle")
+                        .font(.custom("SF Mono Medium", size: 10))
+                        .accessibilityIdentifier("fixture.action.pending")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             #endif
         }
@@ -154,6 +176,23 @@ struct RoomsRootView: View {
             .fill(Color.black.opacity(0.62))
             .ignoresSafeArea()
             .accessibilityHidden(true)
+    }
+
+    private func installFixtureKeyMonitorIfNeeded() {
+        guard store.isFixture, fixtureKeyMonitor == nil else { return }
+        fixtureKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard event.keyCode == 36, modifiers.isEmpty,
+                  store.phase == .idle, let room = store.snapshot.rooms.first else { return event }
+            store.open(room)
+            return nil
+        }
+    }
+
+    private func removeFixtureKeyMonitor() {
+        guard let fixtureKeyMonitor else { return }
+        NSEvent.removeMonitor(fixtureKeyMonitor)
+        self.fixtureKeyMonitor = nil
     }
 }
 
@@ -190,11 +229,19 @@ private struct RoomRow: View {
 
             if let pane = activePane {
                 HStack(spacing: 7) {
-                    Label(pane.currentCommand.isEmpty ? "unknown" : pane.currentCommand, systemImage: "terminal")
+                    Label("\(room.panes.count) pane\(room.panes.count == 1 ? "" : "s")", systemImage: "square.split.2x1")
+                        .accessibilityLabel("\(room.panes.count) panes")
+                        .accessibilityIdentifier("room.\(roomID).pane-count")
+                    Text("·").foregroundStyle(Palette.line)
+                    Text(pane.currentCommand.isEmpty ? "unknown" : pane.currentCommand)
+                        .accessibilityLabel("Active command \(pane.currentCommand.isEmpty ? "unknown" : pane.currentCommand)")
+                        .accessibilityIdentifier("room.\(roomID).active-command")
                     Text("·").foregroundStyle(Palette.line)
                     Text(pane.currentPath.isEmpty ? "Path unavailable" : pane.currentPath)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .accessibilityLabel("Active path \(pane.currentPath.isEmpty ? "unavailable" : pane.currentPath)")
+                        .accessibilityIdentifier("room.\(roomID).active-path")
                 }
                 .font(.custom("SF Mono", size: 10))
                 .foregroundStyle(Palette.muted)
@@ -214,14 +261,17 @@ private struct RoomRow: View {
             HStack(spacing: 8) {
                 Button("Open") { store.open(room) }
                     .buttonStyle(PrimaryActionButtonStyle())
-                    .keyboardShortcut(.defaultAction)
                     .accessibilityLabel("Open existing room \(room.name)")
                     .accessibilityHint(openHint)
                     .accessibilityIdentifier("room.\(roomID).open")
+                    .focusable()
+                    .disabled(store.phase != .idle)
                 Button("Preview") { store.preview(room) }
                     .buttonStyle(SecondaryActionButtonStyle())
                     .accessibilityLabel("Preview \(room.name) read only")
                     .accessibilityIdentifier("room.\(roomID).preview")
+                    .focusable()
+                    .disabled(store.phase != .idle)
                 Spacer()
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) { showsMore.toggle() }
@@ -230,9 +280,11 @@ private struct RoomRow: View {
                 }
                 .buttonStyle(QuietButtonStyle())
                 .accessibilityIdentifier("room.\(roomID).more")
+                .focusable()
+                .disabled(store.phase != .idle)
             }
 
-            if showsMore {
+            if showsMore || store.isFixture {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Duplicate adds another view of this room. Edits are shared; no session is cloned.")
                         .font(.custom("Avenir Next Medium", size: 10))
@@ -241,10 +293,14 @@ private struct RoomRow: View {
                         Button("Duplicate Window") { store.duplicate(room) }
                             .buttonStyle(SecondaryActionButtonStyle())
                             .accessibilityIdentifier("room.\(roomID).duplicate")
+                            .focusable()
+                            .disabled(store.phase != .idle)
                         Button("Delete…", role: .destructive) { store.requestDelete(room) }
                             .buttonStyle(DangerButtonStyle())
                             .accessibilityLabel("Delete room \(room.name)")
                             .accessibilityIdentifier("room.\(roomID).delete")
+                            .focusable()
+                            .disabled(store.phase != .idle)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -490,12 +546,8 @@ private struct LoadingState: View {
 
 private extension SessionRoom {
     var uiIdentifier: String {
-        if name.hasPrefix("한국어-") { return "long-unicode" }
-        let allowed = name.lowercased().map { character -> Character in
-            character.isLetter || character.isNumber || character == "-" ? character : "-"
-        }
-        let collapsed = String(allowed).replacingOccurrences(of: "--", with: "-")
-        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let sessionID = token.sessionID.drop(while: { $0 == "$" })
+        return "session-\(sessionID)-\(token.createdAtUnixSeconds)"
     }
 }
 
