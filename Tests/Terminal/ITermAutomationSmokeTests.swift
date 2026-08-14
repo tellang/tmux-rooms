@@ -31,6 +31,18 @@ private func focus(_ reference: ITermSessionReference, frontmost: Bool = true) -
     .success(.list([descriptor(reference), .boolean(frontmost)]))
 }
 
+@Test("Foundation runner decodes an empty AppleScript list")
+func foundationRunnerDecodesEmptyList() async {
+    let result = await FoundationAppleScriptRunner().execute(source: "return {}")
+    #expect(result == .success(.list([])))
+}
+
+@Test("Foundation runner decodes a nested empty AppleScript list")
+func foundationRunnerDecodesNestedEmptyList() async {
+    let result = await FoundationAppleScriptRunner().execute(source: "return {{}}")
+    #expect(result == .success(.list([.list([])])))
+}
+
 @Test("smoke completes the fixed enumerate, create, and focus sequence")
 func smokeSuccess() async throws {
     let fake = FakeAppleScriptRunner([enumeration([beforeRef]), .success(descriptor(createdRef)), focus(createdRef)])

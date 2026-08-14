@@ -58,9 +58,11 @@ public final class FoundationAppleScriptRunner: AppleScriptRunning, @unchecked S
             return .boolean(descriptor.booleanValue)
         case typeAEList:
             var values: [AppleScriptValue] = []
-            for index in 1...descriptor.numberOfItems {
-                guard let item = descriptor.atIndex(index), let value = decode(item) else { return nil }
-                values.append(value)
+            if descriptor.numberOfItems > 0 {
+                for index in 1...descriptor.numberOfItems {
+                    guard let item = descriptor.atIndex(index), let value = decode(item) else { return nil }
+                    values.append(value)
+                }
             }
             return .list(values)
         default:
