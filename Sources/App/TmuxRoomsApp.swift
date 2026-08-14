@@ -1,10 +1,44 @@
+import AppKit
 import SwiftUI
 import TmuxRoomsCore
 
 @main
 struct TmuxRoomsApp: App {
+    @StateObject private var store: RoomsStore
+    private let fixtureWindowEnabled: Bool
+
     init() {
-        #if !DEBUG
+        #if DEBUG
+        if let value = ProcessInfo.processInfo.environment["TMUX_ROOMS_UI_FIXTURE"] {
+            let fixtureStore = UIFixture(rawValue: value)?.makeStore() ?? UIFixture.invalidStore(value)
+            _store = StateObject(wrappedValue: fixtureStore)
+            fixtureWindowEnabled = true
+        } else {
+            _store = StateObject(wrappedValue: RoomsStore.production())
+            fixtureWindowEnabled = false
+        }
+        #else
+        // Release intentionally does not read TMUX_ROOMS_UI_FIXTURE.
+        _store = StateObject(wrappedValue: RoomsStore.production())
+        fixtureWindowEnabled = false
+        configureReleaseAutomationSmoke()
+        #endif
+    }
+
+    @SceneBuilder
+    var body: some Scene {
+        MenuBarExtra("Tmux Rooms", systemImage: "rectangle.stack") {
+            RoomsRootView(store: store)
+        }
+        .menuBarExtraStyle(.window)
+
+        #if DEBUG
+        FixtureWindowScene(store: store, isEnabled: fixtureWindowEnabled)
+        #endif
+    }
+
+    #if !DEBUG
+    private func configureReleaseAutomationSmoke() {
         let process = ProcessInfo.processInfo
         let arguments = Array(process.arguments.dropFirst())
         do {
@@ -24,27 +58,33 @@ struct TmuxRoomsApp: App {
         } catch where arguments.contains("--iterm-automation-smoke") {
             Task { @MainActor in NSApplication.shared.terminate(nil) }
         } catch {
-            // Normal app launches have no smoke argument and are handled above.
+            // Normal app launches have no smoke argument.
         }
-        #endif
     }
+    #endif
+}
+
+#if DEBUG
+private struct FixtureWindowScene: Scene {
+    @ObservedObject var store: RoomsStore
+    let isEnabled: Bool
 
     var body: some Scene {
-        MenuBarExtra("Tmux Rooms", systemImage: "rectangle.stack") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Tmux Rooms")
-                    .font(.headline)
-                Text("Core v1 bootstrap: \(TmuxRoomsCore.bootstrapMarker)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Divider()
-                Button("Quit Tmux Rooms") {
-                    NSApplication.shared.terminate(nil)
+        Window("Tmux Rooms Fixture", id: "ui-fixture") {
+            Group {
+                if isEnabled {
+                    RoomsRootView(store: store)
+                        .onAppear {
+                            NSApplication.shared.activate(ignoringOtherApps: true)
+                        }
+                } else {
+                    EmptyView()
                 }
             }
-            .padding(14)
-            .frame(width: 280)
         }
-        .menuBarExtraStyle(.window)
+        .defaultSize(width: 480, height: 660)
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(isEnabled ? .presented : .suppressed)
     }
 }
+#endif
