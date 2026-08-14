@@ -20,6 +20,27 @@ print("fixture")
 SWIFT
 xcrun swiftc "$tmp/main.swift" -o "$tmp/fixture-bin"
 
+# A second untrusted self-signed identity deliberately reuses the exact CN.
+cat >"$tmp/alternate-openssl.cnf" <<'EOF'
+[req]
+distinguished_name=dn
+x509_extensions=ext
+prompt=no
+[dn]
+CN=Tmux Rooms Local Development
+O=Alternate Fixture
+OU=Installer Test
+[ext]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=codeSigning
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always
+EOF
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$tmp/alternate-openssl.cnf" \
+  -out "$tmp/alternate-cert.pem" -keyout "$tmp/alternate-key.pem" >/dev/null 2>&1
+alternate_fingerprint="$(openssl x509 -in "$tmp/alternate-cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
+
 write_entitlements() {
   local path="$1" kind="$2"
   case "$kind" in
@@ -63,7 +84,11 @@ make_app() {
 </dict></plist>
 PLIST
   local app_ent="$tmp/app-$RANDOM.plist"
-  write_entitlements "$app_ent" "$app_mode"
+  if [[ "$app_mode" == alternate-cert ]]; then
+    write_entitlements "$app_ent" app
+  else
+    write_entitlements "$app_ent" "$app_mode"
+  fi
   case "$helper_mode" in
     valid) codesign --force --sign "$identity" --options runtime --timestamp=none "$path/Contents/Helpers/tmuxrooms-launch" >/dev/null ;;
     adhoc) codesign --force --sign - --options runtime --timestamp=none "$path/Contents/Helpers/tmuxrooms-launch" >/dev/null ;;
@@ -110,6 +135,10 @@ run_expect 3 arbitrary "$installer" --app-path "$source_app" --destination "$tmp
 [[ -d "$tmp/arbitrary-directory" ]] || fail "arbitrary directory was deleted"
 run_expect 3 relative "$installer" --app-path "$source_app" --destination 'relative/Tmux Rooms.app' --dry-run --non-interactive --no-launch
 run_expect 3 home "$installer" --app-path "$source_app" --destination "$HOME" --dry-run --non-interactive --no-launch
+fake_home="$tmp/fake-home"
+mkdir -p "$fake_home/Applications"
+env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_HOME="$fake_home" \
+  "$installer" --app-path "$source_app" --destination "$fake_home/Applications/Tmux Rooms.app" --dry-run --non-interactive --no-launch >/dev/null
 run_expect 3 repo "$installer" --app-path "$source_app" --destination "$repo_root/Tmux Rooms.app" --dry-run --non-interactive --no-launch
 mkdir -p "$tmp/symlink-case" "$tmp/dangling-case"
 ln -s "$old_app" "$tmp/symlink-case/Tmux Rooms.app"
@@ -140,6 +169,9 @@ bad_app="$tmp/bad-get-task/Tmux Rooms.app"
 make_app "$bad_app" 2 valid app-get-task
 mkdir -p "$tmp/out-get-task"
 run_expect 4 get-task "$installer" --app-path "$bad_app" --destination "$tmp/out-get-task/Tmux Rooms.app" --yes --non-interactive --no-launch
+mkdir -p "$tmp/out-same-cn"
+run_expect 4 same-cn-fingerprint env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_EXPECTED_FINGERPRINT="$alternate_fingerprint" \
+  "$installer" --app-path "$source_app" --destination "$tmp/out-same-cn/Tmux Rooms.app" --yes --non-interactive --no-launch
 
 # Injected staging/final verification failures preserve and roll back the existing app.
 for phase in staging final; do
@@ -150,6 +182,34 @@ for phase in staging final; do
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$rollback/Contents/Info.plist")" == 1 ]] || fail "$phase failure did not preserve version 1"
   codesign --verify --deep --strict "$rollback"
 done
+
+# Persistent transaction recovery covers termination before swap, after swap before state, and preserved rollback failure.
+prepared="$tmp/recovery-prepared/Tmux Rooms.app"
+make_app "$prepared" 1
+run_expect 86 prepared-kill env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_FAIL_PHASE=prepared-kill \
+  "$installer" --app-path "$source_app" --destination "$prepared" --yes --non-interactive --no-launch
+find "$(dirname "$prepared")" -maxdepth 1 -name '.tmux-rooms-transaction.*' | grep -q . || fail "prepared transaction was not preserved"
+"$installer" --app-path "$source_app" --destination "$prepared" --yes --non-interactive --no-launch >/dev/null
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$prepared/Contents/Info.plist")" == 2 ]] || fail "prepared recovery did not complete install"
+! find "$(dirname "$prepared")" -maxdepth 1 -name '.tmux-rooms-transaction.*' | grep -q . || fail "prepared recovery left transaction residue"
+
+swapped="$tmp/recovery-swapped/Tmux Rooms.app"
+make_app "$swapped" 1
+run_expect 137 swapped-kill env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_FAIL_PHASE=swapped-kill \
+  "$installer" --app-path "$source_app" --destination "$swapped" --yes --non-interactive --no-launch
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$swapped/Contents/Info.plist")" == 2 ]] || fail "swap injection did not leave new app at destination"
+"$installer" --app-path "$source_app" --destination "$swapped" --dry-run --non-interactive --no-launch >/dev/null
+! find "$(dirname "$swapped")" -maxdepth 1 -name '.tmux-rooms-transaction.*' | grep -q . || fail "swapped recovery left transaction residue"
+
+rollback_failed="$tmp/recovery-rollback-failed/Tmux Rooms.app"
+make_app "$rollback_failed" 1
+run_expect 6 rollback-swap-failed env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_FAIL_PHASE=final TMUX_ROOMS_TEST_FAIL_ROLLBACK_SWAP=1 \
+  "$installer" --app-path "$source_app" --destination "$rollback_failed" --yes --non-interactive --no-launch
+txn_path="$(find "$(dirname "$rollback_failed")" -maxdepth 1 -name '.tmux-rooms-transaction.*' -print -quit)"
+[[ -n "$txn_path" && -d "$txn_path/Tmux Rooms.app" ]] || fail "rollback failure did not preserve original backup transaction"
+grep -q 'rollback-failed' "$txn_path/journal" || fail "rollback failure journal state missing"
+run_expect 6 rollback-residual "$installer" --app-path "$source_app" --destination "$rollback_failed" --dry-run --non-interactive --no-launch
+[[ -d "$txn_path/Tmux Rooms.app" ]] || fail "recovery rerun deleted rollback-failed original"
 
 # Successful explicit replacement installs version 2 and the exact helper path only.
 "$installer" --app-path "$source_app" --destination "$old_app" --yes --non-interactive --no-launch >/dev/null

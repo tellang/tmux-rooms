@@ -19,6 +19,6 @@ scripts/install-local.sh --dry-run --non-interactive
 scripts/install-local.sh
 ```
 
-The installer builds Release and enforces an exact app/helper signature and entitlement allowlist before installation. It accepts only a normalized, non-symlink `Tmux Rooms.app` destination and uses verified staging plus backup/rollback renames rather than deleting an existing app first. A dry run never requires replacement approval; a real replacement requires an interactive `replace` response or explicit `--yes`.
+The installer builds Release and binds app/helper signatures to the single matching Keychain identity fingerprint. It accepts only a normalized, non-symlink `Tmux Rooms.app` destination. Existing installs are replaced with macOS `RENAME_SWAP`, backed by a same-parent hash journal that deterministically recovers interrupted prepared/swapped transactions and preserves rollback failures for manual recovery. `~/Applications/Tmux Rooms.app` is supported. A dry run never requires replacement approval; a real replacement requires an interactive `replace` response or explicit `--yes`.
 
 See `docs/verification/bootstrap.md` for exact validation commands. Deferred features remain only in `TODOS.md`.
