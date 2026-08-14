@@ -13,47 +13,48 @@ public enum AppleScriptExecution: Sendable, Equatable {
     case failure(number: Int?, message: String?)
 }
 
+@MainActor
 public protocol AppleScriptRunning: Sendable {
     func execute(source: String) async -> AppleScriptExecution
 }
 
-public final class FoundationAppleScriptRunner: AppleScriptRunning, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.tellang.tmuxrooms.applescript-smoke")
-
+@MainActor
+public final class FoundationAppleScriptRunner: AppleScriptRunning {
     public init() {}
 
     public func execute(source: String) async -> AppleScriptExecution {
-        await withCheckedContinuation { continuation in
-            queue.async {
-                var error: NSDictionary?
-                guard let script = NSAppleScript(source: source) else {
-                    continuation.resume(returning: .failure(number: nil, message: "Unable to compile AppleScript"))
-                    return
-                }
-                let descriptor = script.executeAndReturnError(&error)
-                if let error {
-                    let number = (error[NSAppleScript.errorNumber] as? NSNumber)?.intValue
-                    let message = error[NSAppleScript.errorMessage] as? String
-                    continuation.resume(returning: .failure(number: number, message: message))
-                    return
-                }
-                guard let value = Self.decode(descriptor) else {
-                    continuation.resume(returning: .failure(number: nil, message: "Unsupported AppleScript descriptor"))
-                    return
-                }
-                continuation.resume(returning: .success(value))
-            }
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: source) else {
+            return .failure(number: nil, message: "Unable to compile AppleScript")
         }
+        let descriptor = script.executeAndReturnError(&error)
+        if let error {
+            let number = (error[NSAppleScript.errorNumber] as? NSNumber)?.intValue
+            let message = error[NSAppleScript.errorMessage] as? String
+            return .failure(number: number, message: message)
+        }
+        guard let value = Self.decode(descriptor) else {
+            return .failure(number: nil, message: "Unsupported AppleScript descriptor")
+        }
+        return .success(value)
     }
 
-    private static func decode(_ descriptor: NSAppleEventDescriptor) -> AppleScriptValue? {
+    static func decode(_ descriptor: NSAppleEventDescriptor) -> AppleScriptValue? {
         switch descriptor.descriptorType {
         case typeNull:
             return .null
         case typeUnicodeText, typeUTF8Text, typeCString, typeChar:
             return descriptor.stringValue.map(AppleScriptValue.string)
-        case typeSInt16, typeSInt32, typeUInt32, typeSInt64, typeUInt64:
-            return .integer(Int(descriptor.int32Value))
+        case typeSInt16:
+            return decodeInteger(descriptor, as: Int16.self).map { .integer(Int($0)) }
+        case typeSInt32:
+            return decodeInteger(descriptor, as: Int32.self).map { .integer(Int($0)) }
+        case typeUInt32:
+            return decodeInteger(descriptor, as: UInt32.self).map { .integer(Int($0)) }
+        case typeSInt64:
+            return decodeInteger(descriptor, as: Int64.self).flatMap { Int(exactly: $0).map(AppleScriptValue.integer) }
+        case typeUInt64:
+            return decodeInteger(descriptor, as: UInt64.self).flatMap { Int(exactly: $0).map(AppleScriptValue.integer) }
         case typeBoolean, typeTrue, typeFalse:
             return .boolean(descriptor.booleanValue)
         case typeAEList:
@@ -68,5 +69,11 @@ public final class FoundationAppleScriptRunner: AppleScriptRunning, @unchecked S
         default:
             return nil
         }
+    }
+
+    private static func decodeInteger<T>(_ descriptor: NSAppleEventDescriptor, as type: T.Type) -> T? {
+        let data = descriptor.data
+        guard data.count == MemoryLayout<T>.size else { return nil }
+        return data.withUnsafeBytes { $0.loadUnaligned(as: T.self) }
     }
 }

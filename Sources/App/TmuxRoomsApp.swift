@@ -15,8 +15,8 @@ struct TmuxRoomsApp: App {
                 bundleIdentifier: Bundle.main.bundleIdentifier,
                 releaseEnabled: true
             ) {
-                Task {
-                    await SmokeCoordinator(runner: FoundationAppleScriptRunner()) {
+                Task { @MainActor in
+                    _ = await SmokeCoordinator(runner: FoundationAppleScriptRunner()) {
                         await MainActor.run { NSApplication.shared.terminate(nil) }
                     }.run(runID: runID)
                 }

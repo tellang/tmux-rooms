@@ -20,6 +20,7 @@ public enum SmokeAutomationError: Error, Sendable, Codable, Equatable {
     case staleTarget
     case notFound
     case ambiguous
+    case activationNotVerified
     case invalidReply
     case scriptFailure(number: Int?)
 }
@@ -42,6 +43,7 @@ public struct SmokeRunReport: Sendable, Equatable {
     public let finalResult: SmokeFinalResult
 }
 
+@MainActor
 public struct ITermAutomationSmoke: Sendable {
     private let runner: any AppleScriptRunning
 
@@ -74,7 +76,7 @@ public struct ITermAutomationSmoke: Sendable {
         case let .success(actual):
             return report(startedAt, decoded.version, decoded.references, created, actual, steps, .success)
         case let .failure(error):
-            return report(startedAt, decoded.version, decoded.references, created, nil, steps, .failure(error))
+            return report(startedAt, decoded.version, decoded.references, created, focusResult.actual, steps, .failure(error))
         }
     }
 
@@ -82,32 +84,35 @@ public struct ITermAutomationSmoke: Sendable {
         await focusDetail(reference: reference, provenance: provenance).result
     }
 
-    private func focusDetail(reference: ITermSessionReference, provenance: ReferenceProvenance) async -> (result: Result<ITermSessionReference, SmokeAutomationError>, step: SmokeStepEvidence) {
+    private func focusDetail(reference: ITermSessionReference, provenance: ReferenceProvenance) async -> (result: Result<ITermSessionReference, SmokeAutomationError>, actual: ITermSessionReference?, step: SmokeStepEvidence) {
         let source: String
         do { source = try ITermSmokeScripts.focus(reference) }
         catch {
-            return (.failure(.invalidReply), SmokeStepEvidence(name: "focus", durationMilliseconds: 0, outcome: .failure(.invalidReply), appleScriptErrorNumber: nil))
+            return (.failure(.invalidReply), nil, SmokeStepEvidence(name: "focus", durationMilliseconds: 0, outcome: .failure(.invalidReply), appleScriptErrorNumber: nil))
         }
         let execution = await execute(name: "focus", source: source)
         switch execution.result {
         case let .failure(number, _):
-            return (.failure(Self.map(number)), execution.step)
+            return (.failure(Self.map(number)), nil, execution.step)
         case let .success(value):
-            guard case let .list(items) = value else { return (.failure(.invalidReply), execution.step.replacingOutcome(.failure(.invalidReply))) }
+            guard case let .list(items) = value else { return (.failure(.invalidReply), nil, execution.step.replacingOutcome(.failure(.invalidReply))) }
             if items == [.string("not-found")] {
                 let error: SmokeAutomationError = provenance == .created ? .staleTarget : .notFound
-                return (.failure(error), execution.step.replacingOutcome(.failure(error)))
+                return (.failure(error), nil, execution.step.replacingOutcome(.failure(error)))
             }
-            if items == [.string("ambiguous")] { return (.failure(.ambiguous), execution.step.replacingOutcome(.failure(.ambiguous))) }
-            guard items.count == 2, let actual = Self.decodeReference(items[0]), items[1] == .boolean(true) else {
-                let error: SmokeAutomationError = provenance == .created ? .staleTarget : .invalidReply
-                return (.failure(error), execution.step.replacingOutcome(.failure(error)))
+            if items == [.string("ambiguous")] { return (.failure(.ambiguous), nil, execution.step.replacingOutcome(.failure(.ambiguous))) }
+            guard items.count == 2, let actual = Self.decodeReference(items[0]) else {
+                return (.failure(.invalidReply), nil, execution.step.replacingOutcome(.failure(.invalidReply)))
             }
             guard actual == reference else {
                 let error: SmokeAutomationError = provenance == .created ? .staleTarget : .invalidReply
-                return (.failure(error), execution.step.replacingOutcome(.failure(error)))
+                return (.failure(error), actual, execution.step.replacingOutcome(.failure(error)))
             }
-            return (.success(actual), execution.step)
+            guard items[1] == .boolean(true) else {
+                let error: SmokeAutomationError = items[1] == .boolean(false) ? .activationNotVerified : .invalidReply
+                return (.failure(error), actual, execution.step.replacingOutcome(.failure(error)))
+            }
+            return (.success(actual), actual, execution.step)
         }
     }
 

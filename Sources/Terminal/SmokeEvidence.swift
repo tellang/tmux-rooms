@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Security
 
 public enum SmokeStepOutcome: Sendable, Codable, Equatable {
@@ -90,7 +91,11 @@ public extension JSONDecoder {
     static var smoke: JSONDecoder { let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601; return decoder }
 }
 
-public struct SmokeEvidenceWriter: Sendable {
+public protocol SmokeEvidenceWriting: Sendable {
+    func write(_ evidence: SmokeEvidence) throws -> URL
+}
+
+public struct SmokeEvidenceWriter: SmokeEvidenceWriting, Sendable {
     private let rootDirectory: URL
 
     public init(rootDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/Tmux Rooms/iTerm-automation-smoke", directoryHint: .isDirectory)) {
@@ -105,21 +110,35 @@ public struct SmokeEvidenceWriter: Sendable {
     }
 }
 
+public enum SmokeCoordinatorResult: Sendable, Equatable {
+    case evidenceWritten(URL)
+    case evidenceWriteFailed(String)
+}
+
+@MainActor
 public struct SmokeCoordinator: Sendable {
     private let runner: any AppleScriptRunning
-    private let writer: SmokeEvidenceWriter
+    private let writer: any SmokeEvidenceWriting
     private let bundle: SmokeBundleEvidence
     private let terminate: @Sendable () async -> Void
 
-    public init(runner: any AppleScriptRunning, writer: SmokeEvidenceWriter = .init(), bundle: SmokeBundleEvidence = .current(), terminate: @escaping @Sendable () async -> Void) {
+    public init(runner: any AppleScriptRunning, writer: any SmokeEvidenceWriting = SmokeEvidenceWriter(), bundle: SmokeBundleEvidence = .current(), terminate: @escaping @Sendable () async -> Void) {
         self.runner = runner; self.writer = writer; self.bundle = bundle; self.terminate = terminate
     }
 
-    public func run(runID: UUID) async {
+    public func run(runID: UUID) async -> SmokeCoordinatorResult {
         let report = await ITermAutomationSmoke(runner: runner).run()
         let duration = max(0, Int(report.finishedAt.timeIntervalSince(report.startedAt) * 1_000))
         let evidence = SmokeEvidence(schemaVersion: 1, runID: runID, startedAt: report.startedAt, finishedAt: report.finishedAt, durationMilliseconds: duration, bundle: bundle, iTermVersion: report.iTermVersion, before: report.before, created: report.created, actual: report.actual, steps: report.steps, finalResult: report.finalResult)
-        _ = try? writer.write(evidence)
+        let result: SmokeCoordinatorResult
+        do {
+            result = .evidenceWritten(try writer.write(evidence))
+        } catch {
+            let message = String(describing: error)
+            Logger(subsystem: "com.tellang.tmuxrooms", category: "iTerm-automation-smoke").error("Evidence write failed: \(message, privacy: .public)")
+            result = .evidenceWriteFailed(message)
+        }
         await terminate()
+        return result
     }
 }
