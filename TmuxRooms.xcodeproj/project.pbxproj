@@ -24,6 +24,7 @@
 		74C1C9D7BC580DC304917080 /* TmuxLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE26E2D3966BF8151031C39 /* TmuxLoaderTests.swift */; };
 		8EF0879A225BE214B86F89DD /* SmokeEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = C55493BCB7918FC24A28A050 /* SmokeEvidence.swift */; };
 		B00516D3AC83FAE3D69DA88C /* SmokeLaunchContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB31C5F8FE444CDB305CA893 /* SmokeLaunchContract.swift */; };
+		BF454645868AF2FD2AFD5E53 /* PublicModelAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B514BAC90FE91285AD9BB1DB /* PublicModelAPITests.swift */; };
 		C1420C57C134B593476D09C4 /* TmuxRoomsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */; };
 		C44F35E51FBB16C60A2EEAE6 /* TmuxSnapshotLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5EE08C39575B88F12B17F8F /* TmuxSnapshotLoader.swift */; };
 		D08288034A47656EE1A291A0 /* TmuxRoomsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */; };
@@ -87,6 +88,7 @@
 		ADE26E2D3966BF8151031C39 /* TmuxLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxLoaderTests.swift; sourceTree = "<group>"; };
 		AF47E7F84171F8676C837CB1 /* ITermSmokeScripts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITermSmokeScripts.swift; sourceTree = "<group>"; };
 		B0A54417C6DE80B1359EEE25 /* AppleScriptRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptRunner.swift; sourceTree = "<group>"; };
+		B514BAC90FE91285AD9BB1DB /* PublicModelAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicModelAPITests.swift; sourceTree = "<group>"; };
 		BF47A9D5A480B05DB1ADC024 /* TmuxCommandRunning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxCommandRunning.swift; sourceTree = "<group>"; };
 		BFE3345A8B4E57CCFADA0784 /* TmuxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModels.swift; sourceTree = "<group>"; };
 		C1724FB192CFBF5916985A13 /* TmuxRoomsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TmuxRoomsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -190,6 +192,7 @@
 			isa = PBXGroup;
 			children = (
 				896E6C3367F410B8BF152135 /* BootstrapTests.swift */,
+				B514BAC90FE91285AD9BB1DB /* PublicModelAPITests.swift */,
 				ADE26E2D3966BF8151031C39 /* TmuxLoaderTests.swift */,
 				2C7C5B029A6A7BF144EAA21A /* TmuxParsingTests.swift */,
 			);
@@ -467,6 +470,7 @@
 				1E6D95D5851C4247C42355EB /* ITermAutomationSmokeTests.swift in Sources */,
 				ED97DD93CFDC1EF5437A8C72 /* IsolatedTmuxHarness.swift in Sources */,
 				D159FC60A8F12221CA74EDA7 /* LauncherContractTests.swift in Sources */,
+				BF454645868AF2FD2AFD5E53 /* PublicModelAPITests.swift in Sources */,
 				0281886B8DE2F4B8EE517096 /* TerminalPlaceholderTests.swift in Sources */,
 				74C1C9D7BC580DC304917080 /* TmuxLoaderTests.swift in Sources */,
 				6417CBB0FDB497D6B39F3B39 /* TmuxParsingTests.swift in Sources */,
