@@ -164,9 +164,27 @@ executable_hash() {
 write_journal() {
   local transaction="$1" phase="$2" old_hash="$3" new_hash="$4" temp="$transaction/journal.new"
   umask 077
-  printf 'phase=%s\nold_hash=%s\nnew_hash=%s\n' "$phase" "$old_hash" "$new_hash" >"$temp"
-  mv "$temp" "$transaction/journal"
-  /bin/sync
+  if [[ ! -d "$transaction" ]]; then
+    [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_PHASE:-}" != "$phase" || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_STEP:-}" != mkdir ]] || return 1
+    mkdir -m 700 "$transaction" || return 1
+  fi
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_PHASE:-}" != "$phase" || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_STEP:-}" != temp-write ]] || return 1
+  printf 'phase=%s\nold_hash=%s\nnew_hash=%s\n' "$phase" "$old_hash" "$new_hash" >"$temp" || return 1
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_PHASE:-}" != "$phase" || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_STEP:-}" != temp-sync ]] || return 1
+  /bin/sync || return 1
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_PHASE:-}" != "$phase" || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_STEP:-}" != rename ]] || return 1
+  mv "$temp" "$transaction/journal" || return 1
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_PHASE:-}" != "$phase" || "${TMUX_ROOMS_TEST_FAIL_JOURNAL_STEP:-}" != final-sync ]] || return 1
+  /bin/sync || return 1
+}
+
+record_journal_or_preserve() {
+  local transaction="$1" phase="$2" old_hash="$3" new_hash="$4"
+  if ! write_journal "$transaction" "$phase" "$old_hash" "$new_hash"; then
+    preserve_transaction=1
+    echo "Journal update failed at phase '$phase'; transaction preserved: $transaction" >&2
+    return 1
+  fi
 }
 
 journal_value() {
@@ -182,10 +200,19 @@ safe_cleanup_transaction() {
 }
 
 build_atomic_swap_tool() {
-  local output_dir="$1" output
+  local output_dir="$1" output clang sdk
   output="$output_dir/atomic-swap"
-  xcrun clang -std=c11 -Wall -Wextra -Werror -O2 "$repo_root/scripts/atomic-swap.c" -o "$output"
-  chmod 755 "$output"
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_ATOMIC_BUILD:-}" != xcrun ]] || return 1
+  clang="$(xcrun --find clang)" || return 1
+  sdk="$(xcrun --sdk macosx --show-sdk-path)" || return 1
+  [[ -x "$clang" ]] || return 1
+  [[ -d "$sdk" ]] || return 1
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_ATOMIC_BUILD:-}" != clang ]] || return 1
+  "$clang" -isysroot "$sdk" -std=c11 -Wall -Wextra -Werror -O2 "$repo_root/scripts/atomic-swap.c" -o "$output" || return 1
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_ATOMIC_BUILD:-}" != chmod ]] || return 1
+  chmod 755 "$output" || return 1
+  [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" != 1 || "${TMUX_ROOMS_TEST_FAIL_ATOMIC_BUILD:-}" != executable ]] || return 1
+  [[ -x "$output" ]] || return 1
   printf '%s\n' "$output"
 }
 
@@ -203,6 +230,11 @@ recover_pending_transaction() {
   transaction="${transactions[0]}"
   journal="$transaction/journal"
   staged="$transaction/Tmux Rooms.app"
+  if [[ -e "$transaction/journal.new" || -L "$transaction/journal.new" ]]; then
+    echo "Incomplete journal.new detected; transaction and original candidate preserved: $transaction" >&2
+    echo "state_path=$transaction/journal.new original_candidate=$staged" >&2
+    exit 6
+  fi
   [[ -f "$journal" && ! -L "$journal" ]] || { echo "Ambiguous transaction preserved: $transaction" >&2; exit 6; }
   phase="$(journal_value "$journal" phase)"
   old_hash="$(journal_value "$journal" old_hash)"
@@ -218,6 +250,14 @@ recover_pending_transaction() {
     "prepared:$old_hash:$new_hash")
       echo "Recovering prepared transaction before swap: $transaction" >&2
       safe_cleanup_transaction "$transaction" "$parent" || { echo "Prepared transaction cleanup failed; preserved: $transaction" >&2; exit 6; }
+      ;;
+    "prepared:MISSING:$new_hash")
+      [[ "$old_hash" == NONE ]] && validate_bundle "$staged" || {
+        echo "First-install prepared transaction is inconsistent; preserved: $transaction" >&2
+        exit 6
+      }
+      echo "Recovering first-install prepared transaction before rename: $transaction" >&2
+      safe_cleanup_transaction "$transaction" "$parent" || { echo "First-install prepared cleanup failed; preserved: $transaction" >&2; exit 6; }
       ;;
     "prepared:$new_hash:$old_hash"|"swapped:$new_hash:$old_hash"|"committed:$new_hash:$old_hash")
       validate_bundle "$destination_path" && validate_bundle "$staged" || {
@@ -349,7 +389,9 @@ rollback_transaction() {
       exit 6
     fi
     if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && "${TMUX_ROOMS_TEST_FAIL_ROLLBACK_SWAP:-0}" == 1 ]] || ! "$atomic_tool" "$destination" "$staging"; then
-      write_journal "$transaction" rollback-failed "$old_hash" "$new_hash" || true
+      if ! write_journal "$transaction" rollback-failed "$old_hash" "$new_hash"; then
+        echo "Rollback-failed journal update also failed; journal.new and transaction preserved" >&2
+      fi
       echo "ROLLBACK FAILED; original app preserved at: $staging" >&2
       echo "Transaction preserved at: $transaction" >&2
       rm -rf "$atomic_tool_dir"
@@ -357,16 +399,24 @@ rollback_transaction() {
     fi
     swap_completed=0
     if [[ "$(executable_hash "$destination" 2>/dev/null || true)" != "$old_hash" ]] || ! validate_bundle "$destination"; then
-      write_journal "$transaction" rollback-failed "$old_hash" "$new_hash" || true
+      if ! write_journal "$transaction" rollback-failed "$old_hash" "$new_hash"; then
+        echo "Rollback-validation journal update failed; transaction preserved" >&2
+      fi
       echo "ROLLBACK VALIDATION FAILED; transaction preserved at: $transaction" >&2
       preserve_transaction=1
       rm -rf "$atomic_tool_dir"
       exit 6
     fi
-    write_journal "$transaction" swapped "$old_hash" "$new_hash" || true
+    if ! write_journal "$transaction" swapped "$old_hash" "$new_hash"; then
+      echo "Rollback succeeded but journal update failed; transaction preserved: $transaction" >&2
+      rm -rf "$atomic_tool_dir"
+      exit 6
+    fi
   elif [[ "$new_install_renamed" -eq 1 ]]; then
     if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && "${TMUX_ROOMS_TEST_FAIL_ROLLBACK_MOVE:-0}" == 1 ]] || ! mv "$destination" "$staging"; then
-      write_journal "$transaction" rollback-failed "$old_hash" "$new_hash" || true
+      if ! write_journal "$transaction" rollback-failed "$old_hash" "$new_hash"; then
+        echo "Rollback-move journal update failed; transaction preserved" >&2
+      fi
       echo "ROLLBACK MOVE FAILED; transaction preserved at: $transaction" >&2
       rm -rf "$atomic_tool_dir"
       exit 6
@@ -395,7 +445,7 @@ new_hash="$(executable_hash "$staging")"
 if [[ "$destination_exists" -eq 1 ]]; then
   old_hash="$(executable_hash "$destination")"
 fi
-write_journal "$transaction" prepared "$old_hash" "$new_hash"
+record_journal_or_preserve "$transaction" prepared "$old_hash" "$new_hash" || exit 6
 
 if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && "${TMUX_ROOMS_TEST_FAIL_PHASE:-}" == prepared-kill ]]; then
   preserve_transaction=1
@@ -416,7 +466,7 @@ fi
 if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && "${TMUX_ROOMS_TEST_FAIL_PHASE:-}" == swapped-kill ]]; then
   /bin/kill -9 $$
 fi
-write_journal "$transaction" swapped "$old_hash" "$new_hash"
+record_journal_or_preserve "$transaction" swapped "$old_hash" "$new_hash" || exit 6
 
 if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && "${TMUX_ROOMS_TEST_FAIL_PHASE:-}" == final ]]; then
   echo "Injected final verification failure" >&2
@@ -424,7 +474,7 @@ if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && "${TMUX_ROOMS_TEST_FAIL_PHASE
 fi
 validate_bundle "$destination" || exit 5
 
-write_journal "$transaction" committed "$old_hash" "$new_hash"
+record_journal_or_preserve "$transaction" committed "$old_hash" "$new_hash" || exit 6
 safe_cleanup_transaction "$transaction" "$destination_parent" || {
   preserve_transaction=1
   echo "Committed transaction cleanup failed; preserved at: $transaction" >&2

@@ -124,6 +124,9 @@ make_app "$old_app" 1
 # Dry-run validates but never needs replacement approval and never mutates.
 "$installer" --app-path "$source_app" --destination "$old_app" --dry-run --non-interactive --no-launch >/dev/null
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$old_app/Contents/Info.plist")" == 1 ]] || fail "dry-run mutated existing app"
+mkdir -p "$tmp/atomic-build-failure"
+run_expect 4 atomic-compile-failure env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_FAIL_ATOMIC_BUILD=clang \
+  "$installer" --app-path "$source_app" --destination "$tmp/atomic-build-failure/Tmux Rooms.app" --dry-run --non-interactive --no-launch
 
 # A real replacement still requires explicit approval.
 run_expect 2 refusal "$installer" --app-path "$source_app" --destination "$old_app" --non-interactive --no-launch
@@ -193,6 +196,18 @@ find "$(dirname "$prepared")" -maxdepth 1 -name '.tmux-rooms-transaction.*' | gr
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$prepared/Contents/Info.plist")" == 2 ]] || fail "prepared recovery did not complete install"
 ! find "$(dirname "$prepared")" -maxdepth 1 -name '.tmux-rooms-transaction.*' | grep -q . || fail "prepared recovery left transaction residue"
 
+first_install="$tmp/recovery-first-install/Tmux Rooms.app"
+mkdir -p "$(dirname "$first_install")"
+run_expect 86 first-install-prepared env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_FAIL_PHASE=prepared-kill \
+  "$installer" --app-path "$source_app" --destination "$first_install" --yes --non-interactive --no-launch
+[[ ! -e "$first_install" ]] || fail "first-install prepared injection unexpectedly created destination"
+first_txn="$(find "$(dirname "$first_install")" -maxdepth 1 -name '.tmux-rooms-transaction.*' -print -quit)"
+[[ -d "$first_txn/Tmux Rooms.app" ]] || fail "first-install prepared staging was not preserved"
+grep -q '^old_hash=NONE$' "$first_txn/journal" || fail "first-install journal old_hash is not NONE"
+"$installer" --app-path "$source_app" --destination "$first_install" --yes --non-interactive --no-launch >/dev/null
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$first_install/Contents/Info.plist")" == 2 ]] || fail "first-install prepared recovery did not install version 2"
+! find "$(dirname "$first_install")" -maxdepth 1 -name '.tmux-rooms-transaction.*' | grep -q . || fail "first-install recovery left transaction residue"
+
 swapped="$tmp/recovery-swapped/Tmux Rooms.app"
 make_app "$swapped" 1
 run_expect 137 swapped-kill env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_FAIL_PHASE=swapped-kill \
@@ -210,6 +225,16 @@ txn_path="$(find "$(dirname "$rollback_failed")" -maxdepth 1 -name '.tmux-rooms-
 grep -q 'rollback-failed' "$txn_path/journal" || fail "rollback failure journal state missing"
 run_expect 6 rollback-residual "$installer" --app-path "$source_app" --destination "$rollback_failed" --dry-run --non-interactive --no-launch
 [[ -d "$txn_path/Tmux Rooms.app" ]] || fail "recovery rerun deleted rollback-failed original"
+
+journal_failed="$tmp/recovery-journal-failed/Tmux Rooms.app"
+make_app "$journal_failed" 1
+run_expect 6 journal-rename-and-rollback-failed env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_FAIL_PHASE=final \
+  TMUX_ROOMS_TEST_FAIL_ROLLBACK_SWAP=1 TMUX_ROOMS_TEST_FAIL_JOURNAL_PHASE=rollback-failed TMUX_ROOMS_TEST_FAIL_JOURNAL_STEP=rename \
+  "$installer" --app-path "$source_app" --destination "$journal_failed" --yes --non-interactive --no-launch
+journal_txn="$(find "$(dirname "$journal_failed")" -maxdepth 1 -name '.tmux-rooms-transaction.*' -print -quit)"
+[[ -d "$journal_txn/Tmux Rooms.app" && -f "$journal_txn/journal.new" ]] || fail "journal rename failure did not preserve original and journal.new"
+run_expect 6 journal-new-residual "$installer" --app-path "$source_app" --destination "$journal_failed" --dry-run --non-interactive --no-launch
+[[ -d "$journal_txn/Tmux Rooms.app" && -f "$journal_txn/journal.new" ]] || fail "rerun deleted incomplete journal transaction"
 
 # Successful explicit replacement installs version 2 and the exact helper path only.
 "$installer" --app-path "$source_app" --destination "$old_app" --yes --non-interactive --no-launch >/dev/null
