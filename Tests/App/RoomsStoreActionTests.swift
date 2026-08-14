@@ -83,6 +83,120 @@ struct RoomsStoreActionTests {
         #expect(actualNonce == nonce)
         #expect(resolution == .cleanUp)
     }
+
+    @Test("cadence refresh preserves an existing action failure")
+    func cadencePreservesActionFailure() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let handler = ScriptedRoomActionHandler(results: [
+            .failed(.other("open failed")),
+            .succeeded(snapshot: snapshot, focusableClients: [])
+        ])
+        let store = RoomsStore(snapshot: snapshot, isFixture: false, handler: handler)
+
+        store.duplicate(snapshot.rooms[0])
+        await appEventually { store.issue?.message == "open failed" }
+        store.automaticRefresh()
+        await appEventually { handler.intents.count == 2 && store.phase == .idle }
+
+        #expect(store.issue?.message == "open failed")
+        #expect(handler.intents.last == .automaticRefresh(revalidateRecovery: false))
+    }
+
+    @Test("cadence refresh keeps revalidated recovery candidates")
+    func cadenceKeepsRecoveryCandidates() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let first = recoveryCandidate(nonce: "RecoveryCandidate00000001", snapshot: snapshot)
+        let refreshed = recoveryCandidate(nonce: "RecoveryCandidate00000002", snapshot: snapshot)
+        let handler = ScriptedRoomActionHandler(results: [
+            .failed(.ambiguousManaged([refreshed]))
+        ])
+        let store = RoomsStore(
+            snapshot: snapshot,
+            issue: recoveryIssue([first]),
+            isFixture: false,
+            handler: handler
+        )
+
+        store.automaticRefresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+
+        #expect(store.issue?.recoveryCandidates == [refreshed])
+        #expect(handler.intents.last == .automaticRefresh(revalidateRecovery: true))
+    }
+
+    @Test("cadence refresh clears recovery only after no candidate revalidates")
+    func cadenceClearsResolvedRecovery() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let candidate = recoveryCandidate(nonce: "RecoveryCandidate00000003", snapshot: snapshot)
+        let handler = ScriptedRoomActionHandler(results: [
+            .succeeded(snapshot: snapshot, focusableClients: [])
+        ])
+        let store = RoomsStore(
+            snapshot: snapshot,
+            issue: recoveryIssue([candidate]),
+            isFixture: false,
+            handler: handler
+        )
+
+        store.automaticRefresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+
+        #expect(store.issue == nil)
+        #expect(handler.intents.last == .automaticRefresh(revalidateRecovery: true))
+    }
+
+    @Test("cadence success clears a prior inventory refresh failure")
+    func cadenceClearsInventoryFailure() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let handler = ScriptedRoomActionHandler(results: [
+            .succeeded(snapshot: snapshot, focusableClients: [])
+        ])
+        let store = RoomsStore(
+            snapshot: snapshot,
+            issue: AppIssue(
+                kind: .general,
+                title: "Could not refresh tmux",
+                message: "last good list",
+                diagnostics: "timed out",
+                retry: .enabled(.refresh)
+            ),
+            isFixture: false,
+            handler: handler
+        )
+
+        store.automaticRefresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+
+        #expect(store.issue == nil)
+        #expect(handler.intents.last == .automaticRefresh(revalidateRecovery: false))
+    }
+
+    @Test("candidate lookup permission denial is not hidden as an empty recovery list")
+    func candidateLookupPermissionIsTyped() async {
+        let result = await ProductionRoomActionHandler.recoveryCandidatesResult {
+            throw ManagedTerminalError.automation(.permissionDenied)
+        }
+
+        #expect(result == .failed(.automationDenied))
+    }
+
+    @Test("candidate lookup journal errors become terminal diagnostics")
+    func candidateLookupJournalErrorIsTyped() async {
+        let result = await ProductionRoomActionHandler.recoveryCandidatesResult {
+            throw ManagedTerminalError.journal("fixture journal failure")
+        }
+
+        #expect(result == .failed(.terminal(.invalidReply)))
+    }
+
+    @Test("candidate lookup invalid replies become terminal diagnostics")
+    func candidateLookupInvalidReplyIsTyped() async {
+        let result = await ProductionRoomActionHandler.recoveryCandidatesResult {
+            throw ManagedTerminalError.automation(.invalidReply)
+        }
+
+        #expect(result == .failed(.terminal(.invalidReply)))
+    }
 }
 
 @MainActor
@@ -99,6 +213,47 @@ private final class RecordingRoomActionHandler: RoomActionHandling {
         intents.append(intent)
         return .succeeded(snapshot: snapshot, focusableClients: focusable)
     }
+}
+
+@MainActor
+private final class ScriptedRoomActionHandler: RoomActionHandling {
+    private var results: [AppActionResult]
+    private(set) var intents: [RoomActionIntent] = []
+
+    init(results: [AppActionResult]) {
+        self.results = results
+    }
+
+    func perform(_ intent: RoomActionIntent) async -> AppActionResult {
+        intents.append(intent)
+        guard !results.isEmpty else { return .failed(.other("missing scripted result")) }
+        return results.removeFirst()
+    }
+}
+
+private func recoveryCandidate(nonce: String, snapshot: RoomSnapshot) -> ManagedRecoveryCandidate {
+    ManagedRecoveryCandidate(
+        record: ManagedClientRecord(
+            nonce: nonce,
+            launchKind: .reusableRole,
+            role: .primary,
+            requestedSessionToken: snapshot.rooms[0].token,
+            readOnly: false,
+            state: .ambiguous
+        ),
+        roomName: snapshot.rooms[0].name
+    )
+}
+
+private func recoveryIssue(_ candidates: [ManagedRecoveryCandidate]) -> AppIssue {
+    AppIssue(
+        kind: .ambiguousManaged,
+        title: "Managed windows need recovery",
+        message: "fixture",
+        diagnostics: nil,
+        retry: .none,
+        recoveryCandidates: candidates
+    )
 }
 
 private func appSnapshot(clientCount: Int) -> RoomSnapshot {

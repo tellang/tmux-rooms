@@ -5,6 +5,8 @@ typealias OpenRoute = TmuxOpenRoute
 
 enum RoomActionIntent: Sendable, Hashable {
     case refresh
+    case refreshRecovery
+    case automaticRefresh(revalidateRecovery: Bool)
     case open(session: SessionToken, route: OpenRoute)
     case preview(session: SessionToken)
     case duplicateWindow(session: SessionToken)
@@ -14,6 +16,8 @@ enum RoomActionIntent: Sendable, Hashable {
     var fixtureSummary: String {
         switch self {
         case .refresh: "refresh"
+        case .refreshRecovery: "refresh-recovery"
+        case .automaticRefresh(let revalidate): "automatic-refresh recovery=\(revalidate)"
         case .open(_, let route):
             switch route {
             case .detached: "open route=detached"
@@ -84,11 +88,16 @@ final class ProductionRoomActionHandler: RoomActionHandling {
 
     func perform(_ intent: RoomActionIntent) async -> AppActionResult {
         switch intent {
-        case .refresh:
+        case .refresh, .automaticRefresh(revalidateRecovery: false):
             controller.requestRefresh()
             await waitUntilIdle()
             if let failure = controller.refreshError { return .failed(.tmux(failure)) }
             return await success(snapshot: controller.snapshot)
+        case .refreshRecovery, .automaticRefresh(revalidateRecovery: true):
+            controller.requestRefresh()
+            await waitUntilIdle()
+            if let failure = controller.refreshError { return .failed(.tmux(failure)) }
+            return await refreshedRecovery(snapshot: controller.snapshot)
         case .delete(let token):
             guard controller.delete(token) else {
                 return .failed(.other("Another room action is still running."))
@@ -140,6 +149,16 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         return await map(controller.lastActionResult, snapshot: controller.snapshot)
     }
 
+    private func refreshedRecovery(snapshot: RoomSnapshot) async -> AppActionResult {
+        let recovery = await Self.recoveryCandidatesResult {
+            try await terminal.managedRecoveryCandidates(snapshot: snapshot)
+        }
+        if case .succeeded = recovery {
+            return await success(snapshot: snapshot)
+        }
+        return recovery
+    }
+
     private func busyResult() -> AppActionResult {
         .failed(.other("Another room action is still running."))
     }
@@ -165,9 +184,13 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         case .terminalFailure(.timeout): .failed(.timeout(underlyingOperationRunning: false))
         case .terminalFailure(.operationPending): .failed(.timeout(underlyingOperationRunning: true))
         case .terminalFailure(.ambiguous):
-            .failed(.ambiguousManaged((try? await terminal.managedRecoveryCandidates(snapshot: snapshot)) ?? []))
+            await Self.recoveryCandidatesResult {
+                try await terminal.managedRecoveryCandidates(snapshot: snapshot)
+            }
         case .terminalFailure(.managedRecoveryRequired):
-            .failed(.ambiguousManaged((try? await terminal.managedRecoveryCandidates(snapshot: snapshot)) ?? []))
+            await Self.recoveryCandidatesResult {
+                try await terminal.managedRecoveryCandidates(snapshot: snapshot)
+            }
         case .terminalFailure(let failure): .failed(.terminal(failure))
         case nil: .failed(.other("The action completed without a result."))
         }
@@ -177,12 +200,43 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         if let failure = error as? ManagedTerminalError {
             switch failure {
             case .staleOwnership, .notFound: return .failed(.staleTarget)
-            case .ambiguous: return .failed(.ambiguousManaged((try? await terminal.managedRecoveryCandidates(snapshot: controller.snapshot)) ?? []))
+            case .ambiguous:
+                return await Self.recoveryCandidatesResult {
+                    try await terminal.managedRecoveryCandidates(snapshot: controller.snapshot)
+                }
             case .automation(.permissionDenied): return .failed(.automationDenied)
             case .automation(.timeout): return .failed(.timeout(underlyingOperationRunning: false))
             default: return .failed(.terminal(.invalidReply))
             }
         }
         return .failed(.other(String(describing: error)))
+    }
+
+    static func recoveryCandidatesResult(
+        load: () async throws -> [ManagedRecoveryCandidate]
+    ) async -> AppActionResult {
+        do {
+            let candidates = try await load()
+            return candidates.isEmpty
+                ? .succeeded(snapshot: nil, focusableClients: nil)
+                : .failed(.ambiguousManaged(candidates))
+        } catch let failure as ManagedTerminalError {
+            return .failed(candidateLookupFailure(failure))
+        } catch {
+            return .failed(.other(String(describing: error)))
+        }
+    }
+
+    private static func candidateLookupFailure(_ failure: ManagedTerminalError) -> AppActionFailure {
+        switch failure {
+        case .automation(.permissionDenied): .automationDenied
+        case .automation(.timeout): .timeout(underlyingOperationRunning: false)
+        case .automation(.staleTarget), .automation(.notFound), .notFound, .staleOwnership: .staleTarget
+        case .automation(.scriptFailure(let number)): .terminal(.scriptFailure(number: number))
+        case .automation(.ambiguous), .ambiguous: .terminal(.ambiguous)
+        case .automation(.activationNotVerified), .automation(.invalidReply),
+             .invalidNonce, .invalidRecord, .journal, .corruptRecord:
+            .terminal(.invalidReply)
+        }
     }
 }

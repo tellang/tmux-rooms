@@ -39,6 +39,11 @@ struct AppIssue: Identifiable, Sendable, Hashable {
     let retry: Retry
     var recoveryCandidates: [ManagedRecoveryCandidate] = []
     var id: String { kind.rawValue }
+
+    var clearsOnAutomaticInventorySuccess: Bool {
+        guard case .enabled(.refresh) = retry else { return false }
+        return true
+    }
 }
 
 struct ClientChooserContext: Identifiable {
@@ -167,7 +172,12 @@ final class RoomsStore: ObservableObject {
     }
 
     func refresh() {
-        Task { await perform(.refresh) }
+        let intent: RoomActionIntent = issue?.kind == .ambiguousManaged ? .refreshRecovery : .refresh
+        Task { await perform(intent) }
+    }
+
+    func automaticRefresh() {
+        Task { await perform(.automaticRefresh(revalidateRecovery: issue?.kind == .ambiguousManaged)) }
     }
 
     func retry(_ intent: RoomActionIntent) {
@@ -214,6 +224,7 @@ final class RoomsStore: ObservableObject {
 
     private func perform(_ intent: RoomActionIntent) async {
         guard phase == .idle else { return }
+        let issueBeforeRefresh = issue
         let generation = fixtureGeneration
         if isFixture {
             fixtureActionCount += 1
@@ -221,7 +232,7 @@ final class RoomsStore: ObservableObject {
             fixtureActiveActions += 1
             fixtureMaxConcurrentActions = max(fixtureMaxConcurrentActions, fixtureActiveActions)
         }
-        phase = intent == .refresh ? .loading : .acting
+        phase = isRefresh(intent) ? .loading : .acting
         if fixtureBlocksActions {
             await withCheckedContinuation { continuation in
                 fixtureGate = continuation
@@ -237,14 +248,40 @@ final class RoomsStore: ObservableObject {
             if let focusableClients {
                 focusability = Dictionary(uniqueKeysWithValues: focusableClients.map { ($0, .focusable) })
             }
-            issue = nil
+            issue = issueAfterSuccessfulRefresh(intent, previous: issueBeforeRefresh)
         case .unavailable(.clientCannotBeFocused):
             issue = AppIssue(kind: .terminalUnavailable, title: "Client unavailable", message: "The selected client cannot be focused.", diagnostics: nil, retry: .none)
         case .failed(let failure):
-            issue = Self.issue(for: failure, retrying: intent)
+            if isAutomaticRefresh(intent),
+               case .tmux = failure,
+               let issueBeforeRefresh {
+                issue = issueBeforeRefresh
+            } else {
+                issue = Self.issue(for: failure, retrying: intent)
+            }
         }
         if isFixture { fixtureActiveActions -= 1 }
         phase = .idle
+    }
+
+    private func isRefresh(_ intent: RoomActionIntent) -> Bool {
+        switch intent {
+        case .refresh, .refreshRecovery, .automaticRefresh: true
+        default: false
+        }
+    }
+
+    private func isAutomaticRefresh(_ intent: RoomActionIntent) -> Bool {
+        if case .automaticRefresh = intent { true } else { false }
+    }
+
+    private func issueAfterSuccessfulRefresh(_ intent: RoomActionIntent, previous: AppIssue?) -> AppIssue? {
+        guard isAutomaticRefresh(intent), let previous else { return nil }
+        if previous.kind == .ambiguousManaged {
+            guard case .automaticRefresh(revalidateRecovery: true) = intent else { return previous }
+            return nil
+        }
+        return previous.clearsOnAutomaticInventorySuccess ? nil : previous
     }
 
     private static func issue(for failure: AppActionFailure, retrying intent: RoomActionIntent) -> AppIssue {

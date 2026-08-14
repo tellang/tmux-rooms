@@ -11,7 +11,14 @@ final class FixtureRoomActionHandler: RoomActionHandling {
     }
 
     func perform(_ intent: RoomActionIntent) async -> AppActionResult {
-        .succeeded(snapshot: intent == .refresh || isDelete(intent) ? snapshot : nil, focusableClients: nil)
+        .succeeded(snapshot: isRefresh(intent) || isDelete(intent) ? snapshot : nil, focusableClients: nil)
+    }
+
+    private func isRefresh(_ intent: RoomActionIntent) -> Bool {
+        switch intent {
+        case .refresh, .refreshRecovery, .automaticRefresh: true
+        default: false
+        }
     }
 
     private func isDelete(_ intent: RoomActionIntent) -> Bool {

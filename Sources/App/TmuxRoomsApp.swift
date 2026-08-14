@@ -30,7 +30,7 @@ struct TmuxRoomsApp: App {
         #endif
         _store = StateObject(wrappedValue: store)
         refreshCadence = RefreshCadence(isEnabled: !store.isFixture) {
-            store.refresh()
+            store.automaticRefresh()
         }
         refreshCadence.start()
         #if !DEBUG
