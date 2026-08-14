@@ -5,6 +5,59 @@ import Testing
 
 @Suite("terminal-side managed supervisor", .serialized)
 struct ManagedSupervisorIntegrationTests {
+    @Test("initial handshake failure terminates the just-started child")
+    func initialHandshakeFailureCleansUpChild() async throws {
+        try await IsolatedTmuxHarness.withHarness { h in
+            #expect((try await h.command(["new-session", "-d", "-s", "first", "/bin/sleep", "60"])).exitCode == 0)
+            let snapshot = try await TmuxSnapshotLoader(executableURL: h.tmux).load(socketURL: h.socket)
+            let first = try #require(snapshot.rooms.first { $0.name == "first" })
+            let (journal, stateRoot) = try supervisorJournal(); defer { try? FileManager.default.removeItem(at: stateRoot) }
+            let writer = FailingHandshakeWriter(journal: journal, failOnWrite: 1)
+            let pty = try SupervisorPTY(); defer { pty.close() }
+            let supervisor = ManagedTmuxSupervisor(configuration: .init(nonce: ManagedNonce.generate(), tmuxExecutablePath: h.tmux.path, destination: first.token, readOnly: false), journal: journal, pollInterval: .milliseconds(20), io: pty.io, handshakeWriter: writer.write)
+
+            await #expect(throws: InjectedHandshakeFailure.self) { try await supervisor.run() }
+
+            #expect(supervisor.childPID == nil)
+            #expect((try await h.waitForClients(0)).rooms.flatMap(\.clients).isEmpty)
+            let launchedPID = try #require(writer.childPIDs.first)
+            #expect(Darwin.kill(launchedPID, 0) == -1)
+        }
+    }
+
+    @Test("switch handshake failure leaves neither the old nor new child alive")
+    func switchHandshakeFailureCleansUpNewChild() async throws {
+        try await IsolatedTmuxHarness.withHarness { h in
+            #expect((try await h.command(["new-session", "-d", "-s", "first", "/bin/sleep", "60"])).exitCode == 0)
+            #expect((try await h.command(["new-session", "-d", "-s", "second", "/bin/sleep", "60"])).exitCode == 0)
+            let snapshot = try await TmuxSnapshotLoader(executableURL: h.tmux).load(socketURL: h.socket)
+            let first = try #require(snapshot.rooms.first { $0.name == "first" })
+            let second = try #require(snapshot.rooms.first { $0.name == "second" })
+            let (journal, stateRoot) = try supervisorJournal(); defer { try? FileManager.default.removeItem(at: stateRoot) }
+            let nonce = ManagedNonce.generate()
+            let writer = FailingHandshakeWriter(journal: journal, failOnWrite: 2)
+            let pty = try SupervisorPTY(); defer { pty.close() }
+            let supervisor = ManagedTmuxSupervisor(configuration: .init(nonce: nonce, tmuxExecutablePath: h.tmux.path, destination: first.token, readOnly: false), journal: journal, pollInterval: .milliseconds(20), io: pty.io, handshakeWriter: writer.write)
+            let run = Task { try await supervisor.run() }
+            do { _ = try await h.waitForClients(1) }
+            catch { _ = await supervisor.handle(.init(nonce: nonce, action: .detach)); throw error }
+            let oldChild = try #require(supervisor.childPID)
+
+            let response = await supervisor.handle(.init(nonce: nonce, action: .switchSession(second.token, readOnly: false)))
+
+            #expect(response.status == .rejected)
+            #expect(response.childPID == nil)
+            #expect(supervisor.childPID == nil)
+            #expect((try await h.waitForClients(0)).rooms.flatMap(\.clients).isEmpty)
+            let launchedPIDs = writer.childPIDs
+            #expect(launchedPIDs.count == 2)
+            #expect(launchedPIDs.first == oldChild)
+            for pid in launchedPIDs { #expect(Darwin.kill(pid, 0) == -1) }
+            #expect(await supervisor.handle(.init(nonce: nonce, action: .detach)).status == .completed)
+            _ = try await run.value
+        }
+    }
+
     @Test("exact owned child relaunches, Preview is read-only, stale destination fails closed, and request IDs are idempotent")
     func exactChildLifecycle() async throws {
         try await IsolatedTmuxHarness.withHarness { h in
@@ -69,6 +122,30 @@ struct ManagedSupervisorIntegrationTests {
         #expect(arguments.prefix(4) == ["-S", "/tmp/s", "-f", "/dev/null"])
         #expect(arguments.contains { $0.contains("attach-session -r") })
         #expect(arguments.contains { $0.contains("#{session_created},5") })
+    }
+}
+
+private enum InjectedHandshakeFailure: Error { case writeFailed }
+
+private final class FailingHandshakeWriter: @unchecked Sendable {
+    private let journal: ManagedClientJournal
+    private let failOnWrite: Int
+    private let lock = NSLock()
+    private var writeCount = 0
+    private var recordedPIDs: [Int32] = []
+
+    init(journal: ManagedClientJournal, failOnWrite: Int) { self.journal = journal; self.failOnWrite = failOnWrite }
+
+    var childPIDs: [Int32] { lock.withLock { recordedPIDs } }
+
+    func write(_ handshake: ManagedSupervisorHandshake, to url: URL) throws {
+        let shouldFail = lock.withLock {
+            writeCount += 1
+            recordedPIDs.append(handshake.childPID)
+            return writeCount == failOnWrite
+        }
+        if shouldFail { throw InjectedHandshakeFailure.writeFailed }
+        try journal.atomicWrite(handshake, to: url)
     }
 }
 

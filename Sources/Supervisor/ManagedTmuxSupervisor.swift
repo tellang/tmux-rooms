@@ -73,14 +73,16 @@ public final class ManagedTmuxSupervisor: @unchecked Sendable {
     private let pollInterval: Duration
     private let runner: any TmuxCommandRunning
     private let io: ManagedSupervisorIO?
+    private let handshakeWriter: @Sendable (ManagedSupervisorHandshake, URL) throws -> Void
     private var child: Process?
     private var rawChildPID: Int32?
     private var testingPTYMasters: [FileHandle] = []
     private var configuration: ManagedSupervisorConfiguration
     private var stopped = false
 
-    public init(configuration: ManagedSupervisorConfiguration, journal: ManagedClientJournal = .init(), pollInterval: Duration = .milliseconds(50), runner: any TmuxCommandRunning = ProcessTmuxCommandRunner(), io: ManagedSupervisorIO? = nil) {
+    public init(configuration: ManagedSupervisorConfiguration, journal: ManagedClientJournal = .init(), pollInterval: Duration = .milliseconds(50), runner: any TmuxCommandRunning = ProcessTmuxCommandRunner(), io: ManagedSupervisorIO? = nil, handshakeWriter: (@Sendable (ManagedSupervisorHandshake, URL) throws -> Void)? = nil) {
         self.configuration = configuration; self.journal = journal; self.pollInterval = pollInterval; self.runner = runner; self.io = io
+        self.handshakeWriter = handshakeWriter ?? { handshake, url in try journal.atomicWrite(handshake, to: url) }
     }
 
     public func run() async throws {
@@ -151,7 +153,13 @@ public final class ManagedTmuxSupervisor: @unchecked Sendable {
             child = process; launchedPID = process.processIdentifier
         }
         let handshake = ManagedSupervisorHandshake(nonce: configuration.nonce, supervisorPID: getpid(), childPID: launchedPID, destination: configuration.destination, readOnly: configuration.readOnly)
-        try journal.atomicWrite(handshake, to: journal.handshakeURL(configuration.nonce))
+        do {
+            try handshakeWriter(handshake, journal.handshakeURL(configuration.nonce))
+        } catch {
+            let handshakeError = error
+            try terminateChild()
+            throw handshakeError
+        }
     }
 
     private func validate(_ configuration: ManagedSupervisorConfiguration) async throws {
