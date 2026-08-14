@@ -175,6 +175,72 @@ func managedRoleSwitchReuse() async throws {
     #expect(reconciled.first?.state == .complete)
 }
 
+@Test("rejected switch after terminating the old child fails without a stale owner")
+@MainActor
+func rejectedSwitchAfterTerminateFailsClosed() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let beforeSwitch = RoomSnapshot(server: managedServer, rooms: [managedSnapshot().rooms[0], .init(token: destination, name: "two", lastActivityAtUnixSeconds: 1, panes: [], clients: [])])
+    let supervisor = FixedSupervisorClient(status: .rejected, childPID: nil)
+    let automation = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+    let controller = TerminalController(automation: automation, journal: journal, supervisorClient: supervisor)
+
+    let outcome = try await controller.ensureManaged(role: .primary, destination: destination, readOnly: false, snapshot: beforeSwitch, softDeadline: .milliseconds(10))
+
+    guard case let .failed(rejected) = outcome else { Issue.record("rejected switch without a child must fail closed"); return }
+    #expect(rejected.requestedSessionToken == managedToken)
+    #expect(rejected.childPID == nil)
+    #expect(rejected.liveClientKey == nil)
+    #expect(rejected.pendingSwitch == nil)
+    #expect(rejected.requestID != nil)
+    #expect(automation.createCalls == 0)
+    #expect(await supervisor.count == 1)
+    #expect(try journal.allRecords().count == 1)
+    let stillFailed = try await controller.reconcile(snapshot: managedSnapshot())
+    #expect(stillFailed.first?.state == .failed)
+    #expect(stillFailed.first?.liveClientKey == nil)
+}
+
+@Test("rejected switch preserving the old child waits for fresh exact reconciliation")
+@MainActor
+func rejectedSwitchPreservingChildRequiresFreshReconcile() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let beforeSwitch = RoomSnapshot(server: managedServer, rooms: [managedSnapshot().rooms[0], .init(token: destination, name: "two", lastActivityAtUnixSeconds: 1, panes: [], clients: [])])
+    let supervisor = FixedSupervisorClient(status: .rejected, childPID: 11)
+    let automation = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+    let controller = TerminalController(automation: automation, journal: journal, supervisorClient: supervisor)
+
+    let outcome = try await controller.ensureManaged(role: .primary, destination: destination, readOnly: false, snapshot: beforeSwitch, softDeadline: .milliseconds(10))
+
+    guard case let .pending(rejected) = outcome else { Issue.record("preserved child still requires fresh reconciliation"); return }
+    #expect(rejected.state == .completedNeedsReconcile)
+    #expect(rejected.requestedSessionToken == managedToken)
+    #expect(rejected.childPID == 11)
+    #expect(rejected.liveClientKey == nil)
+    let intent = try #require(rejected.pendingSwitch)
+    let unverified = try await controller.reconcile(snapshot: managedSnapshot())
+    #expect(unverified.first?.state == .completedNeedsReconcile)
+    #expect(unverified.first?.liveClientKey == nil)
+    #expect(unverified.first?.pendingSwitch == intent)
+    try journal.atomicWrite(ManagedSupervisorResponse(requestID: intent.requestID, status: .rejected, childPID: 11), to: journal.responsesDirectory.appending(path: "\(intent.requestID.uuidString).json"))
+    try journal.atomicWrite(ManagedSupervisorHandshake(nonce: nonce, supervisorPID: 10, childPID: 11, destination: managedToken, readOnly: false), to: journal.handshakeURL(nonce))
+
+    let reconciled = try await controller.reconcile(snapshot: managedSnapshot())
+    #expect(reconciled.first?.state == .complete)
+    #expect(reconciled.first?.childPID == 11)
+    #expect(reconciled.first?.liveClientKey == managedKey)
+    #expect(automation.createCalls == 0)
+    #expect(await supervisor.count == 1)
+    #expect(try journal.allRecords().count == 1)
+}
+
 @Test("concurrent managed switches persist one intent and send exactly one request")
 @MainActor
 func concurrentSwitchSingleFlight() async throws {
@@ -382,6 +448,17 @@ private actor FakeSupervisorClient: ManagedSupervisorRequesting {
     func send(_ request: ManagedSupervisorRequest, deadline: Duration) async throws -> ManagedSupervisorResponse {
         count += 1
         return .init(requestID: request.id, status: .completed, childPID: 77)
+    }
+}
+
+private actor FixedSupervisorClient: ManagedSupervisorRequesting {
+    let status: ManagedSupervisorResponseStatus
+    let childPID: Int32?
+    private(set) var count = 0
+    init(status: ManagedSupervisorResponseStatus, childPID: Int32?) { self.status = status; self.childPID = childPID }
+    func send(_ request: ManagedSupervisorRequest, deadline: Duration) async throws -> ManagedSupervisorResponse {
+        count += 1
+        return .init(requestID: request.id, status: status, childPID: childPID)
     }
 }
 

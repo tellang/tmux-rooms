@@ -53,9 +53,9 @@ public final class TerminalController: TerminalControlling {
         try journal.write(switching)
         let response = try await supervisorClient.send(request, deadline: .seconds(3))
         guard response.status == .completed else {
-            let restored = rollback(intent: intent, record: switching)
-            try journal.write(restored)
-            return .ready(restored)
+            let rejected = resolveRejectedSwitch(intent: intent, response: response, record: switching)
+            try journal.write(rejected)
+            return rejected.state == .failed ? .failed(rejected) : .pending(rejected)
         }
         var switched = switching
         switched.requestedSessionToken = destination; switched.readOnly = readOnly; switched.childPID = response.childPID
@@ -171,6 +171,7 @@ public final class TerminalController: TerminalControlling {
         let observedTerminal = terminalMatches[0].terminal
         if let terminal = record.terminal, terminal != observedTerminal { record.state = .ambiguous; record.updatedAt = Date(); try journal.write(record); return record }
         record.terminal = observedTerminal
+        guard original.state != .failed else { return record }
         let room = snapshot.rooms.first { $0.token == record.requestedSessionToken }
         let clients = (room?.clients ?? []).filter { $0.key.tty == observedTerminal.tty && $0.isReadOnly == record.readOnly }
         let exact = record.liveClientKey.map { key in clients.filter { $0.key == key } } ?? clients
@@ -194,8 +195,17 @@ public final class TerminalController: TerminalControlling {
         if record.requestedSessionToken == intent.destination, record.readOnly == intent.readOnly, record.state == .completedNeedsReconcile { return (record, false) }
         let response = try journal.readResponse(requestID: intent.requestID)
         let handshake = try journal.readHandshake(nonce: record.nonce)
-        if response?.status == .rejected {
-            record = rollback(intent: intent, record: record)
+        if let response, response.status == .rejected {
+            record = resolveRejectedSwitch(intent: intent, response: response, record: record)
+            if record.state == .completedNeedsReconcile {
+                let oldOwnerMatches = handshake?.destination == intent.previousSessionToken
+                    && handshake?.readOnly == intent.previousReadOnly
+                    && handshake?.childPID == intent.previousChildPID
+                guard oldOwnerMatches else { try journal.write(record); return (record, true) }
+                record.pendingSwitch = nil
+                record.supervisorPID = handshake?.supervisorPID
+                record.configurationState = .handshakeObserved
+            }
             try journal.write(record)
             return (record, false)
         }
@@ -209,11 +219,18 @@ public final class TerminalController: TerminalControlling {
         return (record, false)
     }
 
-    private func rollback(intent: ManagedSwitchIntent, record original: ManagedClientRecord) -> ManagedClientRecord {
+    private func resolveRejectedSwitch(intent: ManagedSwitchIntent, response: ManagedSupervisorResponse, record original: ManagedClientRecord) -> ManagedClientRecord {
         var record = original
         record.requestedSessionToken = intent.previousSessionToken; record.readOnly = intent.previousReadOnly
-        record.childPID = intent.previousChildPID; record.liveClientKey = intent.previousLiveClientKey
-        record.state = intent.previousState; record.pendingSwitch = nil; record.requestID = nil; record.updatedAt = Date()
+        record.liveClientKey = nil; record.requestID = intent.requestID
+        if let previousChildPID = intent.previousChildPID, response.childPID == previousChildPID {
+            record.childPID = previousChildPID
+            record.state = .completedNeedsReconcile
+        } else {
+            record.childPID = nil; record.pendingSwitch = nil
+            record.state = .failed
+        }
+        record.updatedAt = Date()
         return record
     }
 
