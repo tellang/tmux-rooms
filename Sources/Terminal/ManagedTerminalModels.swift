@@ -72,6 +72,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
     public var liveClientKey: ClientKey?
     public var requestID: UUID?
     public var pendingSwitch: ManagedSwitchIntent?
+    public var pendingPreviewTitle: String?
     public var updatedAt: Date
 
     public init(
@@ -88,6 +89,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
         liveClientKey: ClientKey? = nil,
         requestID: UUID? = nil,
         pendingSwitch: ManagedSwitchIntent? = nil,
+        pendingPreviewTitle: String? = nil,
         updatedAt: Date = Date()
     ) {
         self.nonce = nonce
@@ -103,6 +105,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
         self.liveClientKey = liveClientKey
         self.requestID = requestID
         self.pendingSwitch = pendingSwitch
+        self.pendingPreviewTitle = pendingPreviewTitle
         self.updatedAt = updatedAt
     }
 }

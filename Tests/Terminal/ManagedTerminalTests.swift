@@ -21,6 +21,7 @@ private final class FakeManagedAutomation: ManagedITermAutomating {
     private(set) var createCalls = 0
     private(set) var createdTitles: [String?] = []
     private(set) var titleUpdates: [(ManagedTerminalReference, String, String)] = []
+    var titleResults: [Result<ManagedTerminalReference, SmokeAutomationError>] = []
     private var continuation: CheckedContinuation<Result<ManagedTerminalReference, SmokeAutomationError>, Never>?
 
     init(create: Create = .immediate(.success(managedReference)), evidence: [ManagedSessionEvidence] = []) { self.create = create; self.evidence = evidence }
@@ -36,7 +37,7 @@ private final class FakeManagedAutomation: ManagedITermAutomating {
     }
     func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
         titleUpdates.append((reference, nonce, title))
-        return .success(reference)
+        return titleResults.isEmpty ? .success(reference) : titleResults.removeFirst()
     }
     func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> { .success(reference) }
     func focusExactSession(_ reference: ManagedTerminalReference) async -> Result<ManagedTerminalReference, SmokeAutomationError> { .success(reference) }
@@ -404,6 +405,7 @@ func previewSwitchUpdatesExactTitle() async throws {
 
     guard case let .pending(switched) = outcome else { Issue.record("expected Preview switch pending fresh snapshot"); return }
     #expect(switched.nonce == nonce)
+    #expect(switched.pendingPreviewTitle == "READ ONLY · new \"room\" \\ blue line")
     #expect(fake.createCalls == 0)
     #expect(fake.titleUpdates.isEmpty)
     let reconciled = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
@@ -413,6 +415,46 @@ func previewSwitchUpdatesExactTitle() async throws {
     #expect(fake.titleUpdates.first?.0 == managedReference)
     #expect(fake.titleUpdates.first?.1 == nonce)
     #expect(fake.titleUpdates.first?.2 == "READ ONLY · new \"room\" \\ blue line")
+    #expect(try journal.read(nonce: nonce)?.pendingPreviewTitle == nil)
+    #expect(await supervisor.count == 1)
+}
+
+@Test("failed Preview title update survives controller recreation and retries exact ownership")
+@MainActor
+func previewTitleRetrySurvivesControllerRecreation() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .preview, requestedSessionToken: managedToken, readOnly: true, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let destinationKey = ClientKey(server: managedServer, clientName: managedKey.clientName, tty: managedKey.tty, clientPID: 44, createdAtUnixSeconds: 8)
+    let beforeSwitch = RoomSnapshot(server: managedServer, rooms: [managedSnapshot(readOnly: true).rooms[0], .init(token: destination, name: "retry room", lastActivityAtUnixSeconds: 1, panes: [], clients: [])])
+    let afterSwitch = RoomSnapshot(server: managedServer, rooms: [.init(token: destination, name: "retry room", lastActivityAtUnixSeconds: 1, panes: [], clients: [
+        .init(key: destinationKey, lastActivityAtUnixSeconds: 1, flags: ["read-only"], isReadOnly: true, terminalName: "iTerm2", isControlMode: false)
+    ])])
+    let firstAutomation = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+    firstAutomation.titleResults = [.failure(.timeout)]
+    let supervisor = FakeSupervisorClient()
+    let first = TerminalController(automation: firstAutomation, journal: journal, supervisorClient: supervisor)
+    _ = try await first.ensureManaged(role: .preview, destination: destination, readOnly: true, snapshot: beforeSwitch, softDeadline: .milliseconds(10))
+
+    await #expect(throws: ManagedTerminalError.automation(.timeout)) {
+        try await first.reconcile(snapshot: afterSwitch)
+    }
+    let persisted = try #require(try journal.read(nonce: nonce))
+    #expect(persisted.pendingSwitch == nil)
+    #expect(persisted.pendingPreviewTitle == "READ ONLY · retry room")
+    #expect(firstAutomation.titleUpdates.count == 1)
+
+    let retryAutomation = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+    let recreated = TerminalController(automation: retryAutomation, journal: ManagedClientJournal(root: root), supervisorClient: supervisor)
+    let reconciled = try await recreated.reconcile(snapshot: afterSwitch)
+    #expect(reconciled.first?.liveClientKey == destinationKey)
+    #expect(retryAutomation.titleUpdates.count == 1)
+    #expect(retryAutomation.titleUpdates.first?.0 == managedReference)
+    #expect(retryAutomation.titleUpdates.first?.1 == nonce)
+    #expect(retryAutomation.titleUpdates.first?.2 == "READ ONLY · retry room")
+    #expect(try journal.read(nonce: nonce)?.pendingPreviewTitle == nil)
     #expect(await supervisor.count == 1)
 }
 
@@ -480,6 +522,29 @@ func rejectedSwitchPreservingChildRequiresFreshReconcile() async throws {
     #expect(automation.createCalls == 0)
     #expect(await supervisor.count == 1)
     #expect(try journal.allRecords().count == 1)
+}
+
+@Test("rejected Preview switch rolls back and clears its durable title marker")
+@MainActor
+func rejectedPreviewSwitchClearsTitleMarker() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .preview, requestedSessionToken: managedToken, readOnly: true, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let snapshot = RoomSnapshot(server: managedServer, rooms: [managedSnapshot(readOnly: true).rooms[0], .init(token: destination, name: "rejected room", lastActivityAtUnixSeconds: 1, panes: [], clients: [])])
+    let supervisor = FixedSupervisorClient(status: .rejected, childPID: 11)
+    let automation = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+
+    let outcome = try await TerminalController(automation: automation, journal: journal, supervisorClient: supervisor)
+        .ensureManaged(role: .preview, destination: destination, readOnly: true, snapshot: snapshot, softDeadline: .milliseconds(10))
+
+    guard case let .pending(rolledBack) = outcome else { Issue.record("expected rollback pending fresh reconciliation"); return }
+    #expect(rolledBack.requestedSessionToken == managedToken)
+    #expect(rolledBack.pendingPreviewTitle == nil)
+    #expect(try journal.read(nonce: nonce)?.pendingPreviewTitle == nil)
+    #expect(automation.titleUpdates.isEmpty)
+    #expect(await supervisor.count == 1)
 }
 
 @Test("concurrent managed switches persist one intent and send exactly one request")

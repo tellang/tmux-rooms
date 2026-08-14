@@ -58,6 +58,9 @@ public final class TerminalController: TerminalControlling {
         let intent = ManagedSwitchIntent(requestID: request.id, destination: destination, readOnly: readOnly, previousSessionToken: existing.requestedSessionToken, previousReadOnly: existing.readOnly, previousChildPID: existing.childPID, previousLiveClientKey: existing.liveClientKey, previousState: existing.state)
         var switching = existing
         switching.pendingSwitch = intent; switching.requestID = request.id; switching.state = .launching; switching.updatedAt = Date()
+        switching.pendingPreviewTitle = role == .preview ? Self.previewTitle(
+            roomName: snapshot.rooms.first(where: { $0.token == destination })?.name ?? destination.sessionID
+        ) : nil
         try journal.write(switching)
         let response = try await supervisorClient.send(request, deadline: .seconds(3))
         guard response.status == .completed else {
@@ -142,7 +145,6 @@ public final class TerminalController: TerminalControlling {
         }
         var reconciled: [ManagedClientRecord] = []
         for record in try journal.allRecords() {
-            let hadPendingSwitch = record.pendingSwitch != nil
             let recovered = try recoverPendingSwitch(record)
             if recovered.unresolved { reconciled.append(recovered.record); continue }
             var withHandshake = recovered.record
@@ -150,13 +152,15 @@ public final class TerminalController: TerminalControlling {
                 withHandshake.supervisorPID = handshake.supervisorPID; withHandshake.childPID = handshake.childPID
                 withHandshake.configurationState = .handshakeObserved
             }
-            let resolved = try reconcile(withHandshake, evidence: evidence, snapshot: snapshot)
-            if hadPendingSwitch, resolved.pendingSwitch == nil, resolved.role == .preview,
+            var resolved = try reconcile(withHandshake, evidence: evidence, snapshot: snapshot)
+            if let title = resolved.pendingPreviewTitle,
                resolved.state == .complete || resolved.state == .recovered,
                let terminal = resolved.terminal {
-                let title = Self.previewTitle(roomName: snapshot.rooms.first(where: { $0.token == resolved.requestedSessionToken })?.name ?? resolved.requestedSessionToken.sessionID)
                 switch await automation.setManagedSessionTitle(terminal, nonce: resolved.nonce, title: title) {
-                case .success: break
+                case .success:
+                    resolved.pendingPreviewTitle = nil
+                    resolved.updatedAt = Date()
+                    try journal.write(resolved)
                 case let .failure(error): throw ManagedTerminalError.automation(error)
                 }
             }
@@ -196,8 +200,11 @@ public final class TerminalController: TerminalControlling {
 
         if role == .preview, let terminal = selected.terminal {
             let title = Self.previewTitle(roomName: snapshot.rooms.first(where: { $0.token == selected.requestedSessionToken })?.name ?? selected.requestedSessionToken.sessionID)
+            selected.pendingPreviewTitle = title
+            selected.updatedAt = Date()
+            try journal.write(selected)
             switch await automation.setManagedSessionTitle(terminal, nonce: selected.nonce, title: title) {
-            case .success: break
+            case .success: selected.pendingPreviewTitle = nil
             case let .failure(error): throw ManagedTerminalError.automation(error)
             }
         }
@@ -363,7 +370,7 @@ public final class TerminalController: TerminalControlling {
     private func resolveRejectedSwitch(intent: ManagedSwitchIntent, response: ManagedSupervisorResponse, record original: ManagedClientRecord) -> ManagedClientRecord {
         var record = original
         record.requestedSessionToken = intent.previousSessionToken; record.readOnly = intent.previousReadOnly
-        record.liveClientKey = nil; record.requestID = intent.requestID
+        record.liveClientKey = nil; record.requestID = intent.requestID; record.pendingPreviewTitle = nil
         if let previousChildPID = intent.previousChildPID, response.childPID == previousChildPID {
             record.childPID = previousChildPID
             record.state = .completedNeedsReconcile
