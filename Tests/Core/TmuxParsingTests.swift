@@ -61,6 +61,31 @@ func clientValidation() {
     c = client; c[9] = "1"; c[1] = ""; c[6] = "control-mode,readonly"; c[7] = "1"
     let control = try? TmuxParser.parse(validData(clientFields: c)).rooms[0].clients[0]
     #expect(control?.tty == nil); #expect(control?.isControlMode == true)
+    c[1] = "/dev/ttys009"
+    #expect(throws: TmuxFailure.self) { try TmuxParser.parse(validData(clientFields: c)) }
+}
+
+@Test("record sections are strictly B S-star C-star P-star E")
+func strictSectionOrder() {
+    let valid = record("B", boundary) + record("S", session) + record("C", client) + record("P", pane) + record("E", boundary)
+    #expect((try? TmuxParser.parse(valid)) != nil)
+    let cBeforeS = record("B", boundary) + record("C", client) + record("S", session) + record("P", pane) + record("E", boundary)
+    let sAfterP = record("B", boundary) + record("P", pane) + record("S", session) + record("C", client) + record("E", boundary)
+    let freshRegression = record("B", boundary) + record("C", client) + record("P", pane) + record("S", session) + record("E", boundary)
+    let cAfterP = record("B", boundary) + record("S", session) + record("P", pane) + record("C", client) + record("E", boundary)
+    let interleaved = record("B", boundary) + record("S", session) + record("C", client) + record("P", pane) + record("C", client) + record("E", boundary)
+    for data in [cBeforeS, sAfterP, freshRegression, cAfterP, interleaved] {
+        #expect(throws: TmuxFailure.self) { try TmuxParser.parse(data) }
+    }
+}
+
+@Test("RoomActionResult exposes the frozen UI-facing cases")
+func actionResultCases() {
+    let values: [RoomActionResult] = [
+        .succeeded, .alreadyGone, .staleTarget, .cancelled,
+        .tmuxFailure(.timedOut), .terminalFailure(.timeout)
+    ]
+    #expect(values.count == 6)
 }
 
 @Test("duplicates, orphans, missing panes, and attached mismatch are rejected")

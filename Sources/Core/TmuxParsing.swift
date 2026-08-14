@@ -25,20 +25,24 @@ public enum TmuxParser {
         struct C { let name: String; let tty: String?; let pid: Int32; let created: Int64; let sid: String; let activity: Int64; let flags: [String]; let ro: Bool; let term: String; let control: Bool }
         struct P { let sid: String; let pane: SessionRoom.Pane }
         var sessions: [String:S] = [:], clients: [C] = [], panes: [P] = [], clientKeys = Set<String>(), paneKeys = Set<String>()
+        var phase = 0 // S=0, C=1, P=2; phases may be empty but never regress.
         for (type, f) in records.dropFirst().dropLast() {
             switch type {
             case 83:
+                guard phase == 0 else { throw bad("section order") }
                 guard f.count == 5, validID(f[0], prefix: "$"), sessions[f[0]] == nil, let created = int64(f[1]), let activity = int64(f[3]), let attached = nonnegativeInt(f[4]) else { throw bad("session") }
                 sessions[f[0]] = S(id:f[0], created:created, name:f[2], activity:activity, attached:attached)
             case 67:
+                guard phase <= 1 else { throw bad("section order") }; phase = 1
                 guard f.count == 10, !f[0].isEmpty, let pid = int32(f[2]), let created = int64(f[3]), validID(f[4], prefix:"$"), let activity = int64(f[5]), let ro = bool(f[7]), let control = bool(f[9]) else { throw bad("client") }
                 let flags = Array(Set(f[6].split(separator: ",", omittingEmptySubsequences: true).map(String.init))).sorted()
                 guard flags.contains("readonly") == ro, flags.contains("control-mode") == control else { throw bad("client flags") }
                 let tty: String?
-                if control { tty = f[1].isEmpty ? nil : try validTTY(f[1]) } else { tty = try validTTY(f[1]) }
+                if control { guard f[1].isEmpty else { throw bad("control tty") }; tty = nil } else { tty = try validTTY(f[1]) }
                 guard clientKeys.insert(f[0]).inserted else { throw bad("duplicate client") }
                 clients.append(C(name:f[0], tty:tty, pid:pid, created:created, sid:f[4], activity:activity, flags:flags, ro:ro, term:f[8], control:control))
             case 80:
+                phase = 2
                 guard f.count == 9, validID(f[0], prefix:"$"), validID(f[1], prefix:"@"), validID(f[2], prefix:"%"), let pid = int32(f[3]), let active = bool(f[7]), let dead = bool(f[8]) else { throw bad("pane") }
                 let key = "\(f[0])\u{0}\(f[2])"; guard paneKeys.insert(key).inserted else { throw bad("duplicate pane") }
                 panes.append(P(sid:f[0], pane:.init(windowID:f[1], paneID:f[2], panePID:pid, currentPath:f[4], title:f[5], currentCommand:f[6], isActive:active, isDead:dead)))

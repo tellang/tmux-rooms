@@ -64,7 +64,14 @@ public struct RoomSnapshot: Sendable, Hashable {
     public static let noServer = RoomSnapshot(server: nil, rooms: [])
 }
 
-public enum RoomActionResult: Sendable, Hashable { case completed(RoomSnapshot); case noServer }
+public enum RoomActionResult: Sendable, Hashable {
+    case succeeded
+    case alreadyGone
+    case staleTarget
+    case cancelled
+    case tmuxFailure(TmuxFailure)
+    case terminalFailure(TerminalFailure)
+}
 public enum TmuxFailure: Error, Sendable, Hashable {
     case malformedOutput(String); case unsupportedVersion(String); case commandFailed(exitCode: Int32, stderr: String)
     case timedOut; case cancelled; case outputLimitExceeded; case endpointChanged; case endpointPermissionDenied; case launchFailed(String)
