@@ -5,6 +5,7 @@ public protocol ManagedITermAutomating: Sendable {
     func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError>
     func enumerateManagedSessions() async -> Result<[ManagedSessionEvidence], SmokeAutomationError>
     func createManagedSession(nonce: String, title: String?) async -> Result<ManagedTerminalReference, SmokeAutomationError>
+    func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError>
     func focusExactSession(_ reference: ManagedTerminalReference) async -> Result<ManagedTerminalReference, SmokeAutomationError>
     func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError>
 }
@@ -49,7 +50,7 @@ public enum ITermManagedScripts {
                     set targetTabIndex to targetTabIndex + 1
                     repeat with targetSession in sessions of targetTab
                         try
-                            set targetNonce to variable named "user.tmuxRoomsNonce" of targetSession
+                            set targetNonce to variable targetSession named "user.tmuxRoomsNonce"
                             if targetNonce is not missing value and targetNonce is not "" then set end of resultRows to {targetWindowID, targetTabIndex, unique ID of targetSession, tty of targetSession, targetNonce}
                         end try
                     end repeat
@@ -79,9 +80,9 @@ public enum ITermManagedScripts {
                 set createdWindow to create window with default profile command \(commandLiteral)
                 set createdTab to current tab of createdWindow
             set createdSession to current session of createdTab
-            set variable named "user.tmuxRoomsNonce" of createdSession to \(nonceLiteral)
+            set variable createdSession named "user.tmuxRoomsNonce" to \(nonceLiteral)
             \(titleLines)
-            return {id of createdWindow, 1, unique ID of createdSession, tty of createdSession, variable named "user.tmuxRoomsNonce" of createdSession}
+            return {id of createdWindow, 1, unique ID of createdSession, tty of createdSession, variable createdSession named "user.tmuxRoomsNonce"}
             end tell
         end timeout
         """
@@ -97,7 +98,8 @@ public enum ITermManagedScripts {
                     repeat with targetTab in tabs of targetWindow
                         repeat with targetSession in sessions of targetTab
                             try
-                                if unique ID of targetSession is \(guid) and tty of targetSession is \(tty) and variable named "user.tmuxRoomsNonce" of targetSession is \(nonce) then set end of exactMatches to {targetWindow, targetTab, targetSession}
+                                set targetNonce to variable targetSession named "user.tmuxRoomsNonce"
+                                if unique ID of targetSession is \(guid) and tty of targetSession is \(tty) and targetNonce is \(nonce) then set end of exactMatches to {targetWindow, targetTab, targetSession}
                             end try
                         end repeat
                     end repeat
@@ -117,7 +119,43 @@ public enum ITermManagedScripts {
                     set actualTabIndex to actualTabIndex + 1
                     if candidateTab is matchedTab then exit repeat
                 end repeat
-                return {id of matchedWindow, actualTabIndex, unique ID of matchedSession, tty of matchedSession, variable named "user.tmuxRoomsNonce" of matchedSession}
+                return {id of matchedWindow, actualTabIndex, unique ID of matchedSession, tty of matchedSession, variable matchedSession named "user.tmuxRoomsNonce"}
+            end tell
+        end timeout
+        """
+    }
+
+    public static func setTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) throws -> String {
+        let guid = try AppleScriptLiteral.string(reference.sessionGUID)
+        let tty = try AppleScriptLiteral.string(reference.tty)
+        let nonce = try AppleScriptLiteral.string(nonce)
+        let title = try AppleScriptLiteral.string(title)
+        return """
+        with timeout of 5 seconds
+            tell application id "com.googlecode.iterm2"
+                set exactMatches to {}
+                repeat with targetWindow in windows
+                    set targetTabIndex to 0
+                    repeat with targetTab in tabs of targetWindow
+                        set targetTabIndex to targetTabIndex + 1
+                        repeat with targetSession in sessions of targetTab
+                            try
+                                set targetNonce to variable targetSession named "user.tmuxRoomsNonce"
+                                if unique ID of targetSession is \(guid) and tty of targetSession is \(tty) and targetNonce is \(nonce) then set end of exactMatches to {targetWindow, targetTabIndex, targetTab, targetSession}
+                            end try
+                        end repeat
+                    end repeat
+                end repeat
+                if (count of exactMatches) is 0 then return {"not-found"}
+                if (count of exactMatches) is greater than 1 then return {"ambiguous"}
+                set exactMatch to item 1 of exactMatches
+                set matchedWindow to item 1 of exactMatch
+                set matchedTabIndex to item 2 of exactMatch
+                set matchedTab to item 3 of exactMatch
+                set matchedSession to item 4 of exactMatch
+                set name of matchedSession to \(title)
+                set title of matchedTab to \(title)
+                return {id of matchedWindow, matchedTabIndex, unique ID of matchedSession, tty of matchedSession, variable matchedSession named "user.tmuxRoomsNonce"}
             end tell
         end timeout
         """
@@ -162,6 +200,19 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
             case let .success(value):
                 guard let evidence = Self.decodeEvidence(value), evidence.nonce == nonce else { return .failure(.invalidReply) }
                 return .success(evidence.terminal)
+            }
+        } catch { return .failure(.invalidReply) }
+    }
+
+    public func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
+        do {
+            switch await runner.execute(source: try ITermManagedScripts.setTitle(reference, nonce: nonce, title: title)) {
+            case let .failure(number, _): return .failure(map(number))
+            case .success(.list([.string("not-found")])): return .failure(.notFound)
+            case .success(.list([.string("ambiguous")])): return .failure(.ambiguous)
+            case let .success(value):
+                guard let evidence = Self.decodeEvidence(value), evidence.nonce == nonce, evidence.terminal == reference else { return .failure(.staleTarget) }
+                return .success(reference)
             }
         } catch { return .failure(.invalidReply) }
     }

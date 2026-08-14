@@ -29,6 +29,10 @@ public final class TerminalController: TerminalControlling {
 
     public func ensureManaged(role: ManagedRole, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration = .seconds(5)) async throws -> ManagedTerminalOutcome {
         let readOnly = role == .preview ? true : readOnly
+        let unassigned = try journal.allRecords().filter { $0.launchKind == .reusableRole && $0.role == nil }
+        if !unassigned.isEmpty {
+            return .ambiguous(unassigned + (try journal.reusableRecords(role: role)))
+        }
         var candidates = try journal.reusableRecords(role: role)
         guard !candidates.isEmpty else {
             return try await launch(kind: .reusableRole, role: role, destination: destination, readOnly: readOnly, snapshot: snapshot, deadline: softDeadline)
@@ -138,6 +142,7 @@ public final class TerminalController: TerminalControlling {
         }
         var reconciled: [ManagedClientRecord] = []
         for record in try journal.allRecords() {
+            let hadPendingSwitch = record.pendingSwitch != nil
             let recovered = try recoverPendingSwitch(record)
             if recovered.unresolved { reconciled.append(recovered.record); continue }
             var withHandshake = recovered.record
@@ -145,7 +150,17 @@ public final class TerminalController: TerminalControlling {
                 withHandshake.supervisorPID = handshake.supervisorPID; withHandshake.childPID = handshake.childPID
                 withHandshake.configurationState = .handshakeObserved
             }
-            reconciled.append(try reconcile(withHandshake, evidence: evidence, snapshot: snapshot))
+            let resolved = try reconcile(withHandshake, evidence: evidence, snapshot: snapshot)
+            if hadPendingSwitch, resolved.pendingSwitch == nil, resolved.role == .preview,
+               resolved.state == .complete || resolved.state == .recovered,
+               let terminal = resolved.terminal {
+                let title = Self.previewTitle(roomName: snapshot.rooms.first(where: { $0.token == resolved.requestedSessionToken })?.name ?? resolved.requestedSessionToken.sessionID)
+                switch await automation.setManagedSessionTitle(terminal, nonce: resolved.nonce, title: title) {
+                case .success: break
+                case let .failure(error): throw ManagedTerminalError.automation(error)
+                }
+            }
+            reconciled.append(resolved)
         }
         return reconciled
     }
@@ -179,6 +194,13 @@ public final class TerminalController: TerminalControlling {
             throw ManagedTerminalError.staleOwnership
         }
 
+        if role == .preview, let terminal = selected.terminal {
+            let title = Self.previewTitle(roomName: snapshot.rooms.first(where: { $0.token == selected.requestedSessionToken })?.name ?? selected.requestedSessionToken.sessionID)
+            switch await automation.setManagedSessionTitle(terminal, nonce: selected.nonce, title: title) {
+            case .success: break
+            case let .failure(error): throw ManagedTerminalError.automation(error)
+            }
+        }
         for var conflict in records where conflict.launchKind == .reusableRole && conflict.nonce != nonce && conflict.role == role {
             conflict.role = nil
             conflict.state = .ambiguous

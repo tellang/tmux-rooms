@@ -20,6 +20,7 @@ private final class FakeManagedAutomation: ManagedITermAutomating {
     var evidence: [ManagedSessionEvidence]
     private(set) var createCalls = 0
     private(set) var createdTitles: [String?] = []
+    private(set) var titleUpdates: [(ManagedTerminalReference, String, String)] = []
     private var continuation: CheckedContinuation<Result<ManagedTerminalReference, SmokeAutomationError>, Never>?
 
     init(create: Create = .immediate(.success(managedReference)), evidence: [ManagedSessionEvidence] = []) { self.create = create; self.evidence = evidence }
@@ -32,6 +33,10 @@ private final class FakeManagedAutomation: ManagedITermAutomating {
         case let .immediate(value): return value
         case .suspended: return await withCheckedContinuation { continuation = $0 }
         }
+    }
+    func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
+        titleUpdates.append((reference, nonce, title))
+        return .success(reference)
     }
     func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> { .success(reference) }
     func focusExactSession(_ reference: ManagedTerminalReference) async -> Result<ManagedTerminalReference, SmokeAutomationError> { .success(reference) }
@@ -111,6 +116,26 @@ func reusableRoleConflictFailsClosed() async throws {
     }
 }
 
+@Test("an unassigned reusable candidate blocks both managed role launches without side effects")
+@MainActor
+func unassignedReusableCandidateFailsClosed() async throws {
+    for role in [ManagedRole.primary, .preview] {
+        let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+        let unresolved = ManagedClientRecord(nonce: ManagedNonce.generate(), launchKind: .reusableRole, role: nil, requestedSessionToken: managedToken, readOnly: role == .preview, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, liveClientKey: managedKey)
+        try journal.write(unresolved)
+        let fake = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: unresolved.nonce)])
+        let supervisor = FakeSupervisorClient()
+
+        let outcome = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
+            .ensureManaged(role: role, destination: managedToken, readOnly: role == .preview, snapshot: managedSnapshot(readOnly: role == .preview), softDeadline: .milliseconds(10))
+
+        guard case let .ambiguous(records) = outcome else { Issue.record("unassigned reusable ownership must fail closed"); continue }
+        #expect(records.map(\.nonce) == [unresolved.nonce])
+        #expect(fake.createCalls == 0)
+        #expect(await supervisor.count == 0)
+    }
+}
+
 @Test("recovery exposes exact conflicting identities and promotes only the chosen revalidated record")
 @MainActor
 func exactManagedRecoverySelection() async throws {
@@ -135,6 +160,29 @@ func exactManagedRecoverySelection() async throws {
     #expect(try journal.read(nonce: secondNonce)?.role == .primary)
     #expect(try journal.read(nonce: firstNonce)?.role == nil)
     #expect(remaining.map(\.nonce) == [firstNonce])
+}
+
+@Test("recovering an exact Preview candidate restores its visible room title")
+@MainActor
+func previewRecoveryRestoresExactTitle() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: nil, requestedSessionToken: managedToken, readOnly: true, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let fake = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+    let snapshot = RoomSnapshot(server: managedServer, rooms: [.init(token: managedToken, name: "recovered\nroom", lastActivityAtUnixSeconds: 1, panes: [], clients: [
+        .init(key: managedKey, lastActivityAtUnixSeconds: 1, flags: ["read-only"], isReadOnly: true, terminalName: "iTerm2", isControlMode: false)
+    ])])
+
+    let remaining = try await TerminalController(automation: fake, journal: journal)
+        .resolveManagedCandidate(nonce: nonce, as: .preview, snapshot: snapshot)
+
+    #expect(remaining.isEmpty)
+    #expect(fake.titleUpdates.count == 1)
+    #expect(fake.titleUpdates.first?.0 == managedReference)
+    #expect(fake.titleUpdates.first?.1 == nonce)
+    #expect(fake.titleUpdates.first?.2 == "READ ONLY · recovered room")
+    #expect(try journal.read(nonce: nonce)?.role == .preview)
 }
 
 @Test("ambiguous terminal evidence cannot be promoted")
@@ -333,6 +381,39 @@ func managedRoleSwitchReuse() async throws {
     let reconciled = try await controller.reconcile(snapshot: destinationSnapshot)
     #expect(reconciled.first?.liveClientKey == destinationKey)
     #expect(reconciled.first?.state == .complete)
+}
+
+@Test("Preview A to B reuse updates the exact managed session and tab title")
+@MainActor
+func previewSwitchUpdatesExactTitle() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .preview, requestedSessionToken: managedToken, readOnly: true, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let destination = SessionToken(server: managedServer, sessionID: "$2", createdAtUnixSeconds: 7)
+    let destinationKey = ClientKey(server: managedServer, clientName: managedKey.clientName, tty: managedKey.tty, clientPID: 44, createdAtUnixSeconds: 8)
+    let beforeSwitch = RoomSnapshot(server: managedServer, rooms: [managedSnapshot(readOnly: true).rooms[0], .init(token: destination, name: "new \"room\" \\ blue\nline", lastActivityAtUnixSeconds: 1, panes: [], clients: [])])
+    let afterSwitch = RoomSnapshot(server: managedServer, rooms: [.init(token: destination, name: "new \"room\" \\ blue\nline", lastActivityAtUnixSeconds: 1, panes: [], clients: [
+        .init(key: destinationKey, lastActivityAtUnixSeconds: 1, flags: ["read-only"], isReadOnly: true, terminalName: "iTerm2", isControlMode: false)
+    ])])
+    let fake = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+    let supervisor = FakeSupervisorClient()
+
+    let outcome = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
+        .ensureManaged(role: .preview, destination: destination, readOnly: true, snapshot: beforeSwitch, softDeadline: .milliseconds(10))
+
+    guard case let .pending(switched) = outcome else { Issue.record("expected Preview switch pending fresh snapshot"); return }
+    #expect(switched.nonce == nonce)
+    #expect(fake.createCalls == 0)
+    #expect(fake.titleUpdates.isEmpty)
+    let reconciled = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
+        .reconcile(snapshot: afterSwitch)
+    #expect(reconciled.first?.liveClientKey == destinationKey)
+    #expect(fake.titleUpdates.count == 1)
+    #expect(fake.titleUpdates.first?.0 == managedReference)
+    #expect(fake.titleUpdates.first?.1 == nonce)
+    #expect(fake.titleUpdates.first?.2 == "READ ONLY · new \"room\" \\ blue line")
+    #expect(await supervisor.count == 1)
 }
 
 @Test("rejected switch after terminating the old child fails without a stale owner")
@@ -627,6 +708,26 @@ func helperCommandContract() throws {
     #expect(!script.contains("write text"))
     #expect(!script.contains(managedToken.sessionID))
     #expect(!script.contains(managedToken.server.canonicalSocketPath))
+}
+
+@Test("all generated managed iTerm scripts compile against the installed dictionary")
+@MainActor
+func managedScriptsCompile() throws {
+    let nonce = ManagedNonce.generate()
+    let helper = try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/Applications/Tmux Rooms.app"))
+    let scripts = [
+        ITermManagedScripts.enumerate,
+        try ITermManagedScripts.create(nonce: nonce, title: "READ ONLY · quoted \\\"room\\\"", helperPath: helper),
+        try ITermManagedScripts.focus(managedReference, nonce: nonce),
+        try ITermManagedScripts.setTitle(managedReference, nonce: nonce, title: "READ ONLY · next \\\"room\\\"")
+    ]
+    for source in scripts {
+        var error: NSDictionary?
+        let script = try #require(NSAppleScript(source: source))
+        let compiled = script.compileAndReturnError(&error)
+        #expect(compiled, Comment(rawValue: error.map(String.init(describing:)) ?? "AppleScript compilation failed"))
+        #expect(error == nil)
+    }
 }
 
 @Test("managed AppleScript decoding requires returned nonce and fixed ownership fields")
