@@ -101,6 +101,7 @@ targets:
     sources:
       - Sources/App/RoomActions.swift
       - Sources/App/RoomsStore.swift
+      - Sources/App/RefreshCadence.swift
       - Tests/App
       - Tests/Core
       - Tests/Terminal
