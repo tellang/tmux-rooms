@@ -368,6 +368,26 @@ func genericClientFocus() async throws {
     #expect(result == .external(reference: managedReference, clientKey: managedKey))
 }
 
+@Test("focusability resolves only a unique exact local iTerm TTY")
+@MainActor
+func exactLocalFocusability() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let unique = TerminalController(
+        automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: ManagedNonce.generate())]),
+        journal: journal
+    )
+    #expect(try await unique.focusableClientKeys(snapshot: managedSnapshot()) == [managedKey])
+
+    let ambiguous = TerminalController(
+        automation: FakeManagedAutomation(evidence: [
+            .init(terminal: managedReference, nonce: ManagedNonce.generate()),
+            .init(terminal: managedReference, nonce: ManagedNonce.generate())
+        ]),
+        journal: journal
+    )
+    #expect(try await ambiguous.focusableClientKeys(snapshot: managedSnapshot()).isEmpty)
+}
+
 @Test("soft timeout keeps one Automation call alive, blocks retry, and absorbs late success")
 @MainActor
 func timeoutLateSuccessSingleFlight() async throws {
@@ -381,8 +401,7 @@ func timeoutLateSuccessSingleFlight() async throws {
     guard case .pending = second else { Issue.record("retry should be blocked"); return }
     #expect(fake.createCalls == 1)
     fake.complete(.success(managedReference))
-    let deadline = ContinuousClock.now.advanced(by: .seconds(1))
-    while ContinuousClock.now < deadline, try journal.read(nonce: timedOut.nonce)?.state != .recovered { try await Task.sleep(for: .milliseconds(10)) }
+    await controller.waitForPendingOperation(nonce: timedOut.nonce)
     #expect(try journal.read(nonce: timedOut.nonce)?.state == .recovered)
     #expect(fake.createCalls == 1)
 }

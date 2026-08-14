@@ -51,6 +51,11 @@ public final class TmuxController {
         startRefresh()
     }
 
+    public func focusableClientKeys() async -> Set<ClientKey> {
+        guard let terminal else { return [] }
+        return (try? await terminal.focusableClientKeys(snapshot: snapshot)) ?? []
+    }
+
     @discardableResult
     public func delete(_ token: SessionToken) -> Bool {
         guard phase == .idle || phase == .refreshing else { return false }
@@ -165,24 +170,15 @@ public final class TmuxController {
                         }
                         result = final
                     case let .managed(nonce, focusWhenReady):
-                        let records = try await terminal.reconcile(snapshot: snapshot)
-                        guard let record = records.first(where: { $0.nonce == nonce }) else {
-                            self?.finishTerminalReconcile(.success(snapshot), result: .terminalFailure(.notFound), generation: actionGeneration)
+                        let initial = try await Self.resolveManaged(nonce: nonce, focusWhenReady: focusWhenReady, terminal: terminal, snapshot: snapshot)
+                        if initial == .terminalFailure(.operationPending) {
+                            await terminal.waitForPendingOperation(nonce: nonce)
+                            let completedSnapshot = try await loader.load(socketURL: socketURL)
+                            let completed = try await Self.resolveManaged(nonce: nonce, focusWhenReady: focusWhenReady, terminal: terminal, snapshot: completedSnapshot)
+                            self?.finishTerminalReconcile(.success(completedSnapshot), result: completed, generation: actionGeneration)
                             return
                         }
-                        switch record.state {
-                        case .complete, .recovered:
-                            if focusWhenReady, let key = record.liveClientKey {
-                                _ = try await terminal.focus(clientKey: key, snapshot: snapshot)
-                            }
-                            result = .succeeded
-                        case .ambiguous:
-                            result = .terminalFailure(.ambiguous)
-                        case .failed:
-                            result = .terminalFailure(.notFound)
-                        case .provisional, .launching, .timedOutButRunning, .completedNeedsReconcile:
-                            result = .terminalFailure(.operationPending)
-                        }
+                        result = initial
                     }
                 } catch {
                     result = Self.roomFailure(error)
@@ -212,6 +208,31 @@ public final class TmuxController {
             return .final(.terminalFailure(.notFound))
         case .ambiguous:
             return .final(.terminalFailure(.ambiguous))
+        }
+    }
+
+    private static func resolveManaged(
+        nonce: String,
+        focusWhenReady: Bool,
+        terminal: any TerminalControlling,
+        snapshot: RoomSnapshot
+    ) async throws -> RoomActionResult {
+        let records = try await terminal.reconcile(snapshot: snapshot)
+        guard let record = records.first(where: { $0.nonce == nonce }) else {
+            return .terminalFailure(.notFound)
+        }
+        switch record.state {
+        case .complete, .recovered:
+            if focusWhenReady, let key = record.liveClientKey {
+                _ = try await terminal.focus(clientKey: key, snapshot: snapshot)
+            }
+            return .succeeded
+        case .ambiguous:
+            return .terminalFailure(.ambiguous)
+        case .failed:
+            return .terminalFailure(.notFound)
+        case .provisional, .launching, .timedOutButRunning, .completedNeedsReconcile:
+            return .terminalFailure(.operationPending)
         }
     }
 

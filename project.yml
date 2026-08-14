@@ -99,6 +99,9 @@ targets:
     type: bundle.unit-test
     platform: macOS
     sources:
+      - Sources/App/RoomActions.swift
+      - Sources/App/RoomsStore.swift
+      - Tests/App
       - Tests/Core
       - Tests/Terminal
       - Tests/Integration

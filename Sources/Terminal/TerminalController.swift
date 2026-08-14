@@ -7,6 +7,8 @@ public protocol TerminalControlling: Sendable {
     func launchDuplicate(destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration) async throws -> ManagedTerminalOutcome
     func focus(clientKey: ClientKey, snapshot: RoomSnapshot) async throws -> TerminalFocusResult
     func reconcile(snapshot: RoomSnapshot) async throws -> [ManagedClientRecord]
+    func focusableClientKeys(snapshot: RoomSnapshot) async throws -> Set<ClientKey>
+    func waitForPendingOperation(nonce: String) async
 }
 
 @MainActor
@@ -17,6 +19,7 @@ public final class TerminalController: TerminalControlling {
     private let supervisorClient: any ManagedSupervisorRequesting
     private let lateFailureHandler: @MainActor @Sendable (String) -> Void
     private var launches: [String: Task<Result<ManagedTerminalReference, SmokeAutomationError>, Never>] = [:]
+    private var lateCompletions: [String: Task<Void, Never>] = [:]
 
     public init(automation: any ManagedITermAutomating = ITermManagedAutomation(), journal: ManagedClientJournal = .init(), tmuxExecutablePath: String = "/opt/homebrew/bin/tmux", supervisorClient: (any ManagedSupervisorRequesting)? = nil, lateFailureHandler: (@MainActor @Sendable (String) -> Void)? = nil) {
         self.automation = automation; self.journal = journal; self.tmuxExecutablePath = tmuxExecutablePath
@@ -87,6 +90,33 @@ public final class TerminalController: TerminalControlling {
         }
     }
 
+    public func focusableClientKeys(snapshot: RoomSnapshot) async throws -> Set<ClientKey> {
+        let records = try await reconcile(snapshot: snapshot)
+        let managed: Set<ClientKey> = Set(records.compactMap { record -> ClientKey? in
+            guard record.state == .complete || record.state == .recovered else { return nil }
+            return record.liveClientKey
+        })
+        let references: [ManagedTerminalReference]
+        switch await automation.enumerateSessions() {
+        case let .success(value): references = value
+        case let .failure(error): throw ManagedTerminalError.automation(error)
+        }
+        let ttyCounts = Dictionary(grouping: references, by: \.tty).mapValues(\.count)
+        let local = snapshot.rooms.flatMap(\.interactiveClients).compactMap { client -> ClientKey? in
+            guard let tty = client.tty, ttyCounts[tty] == 1 else { return nil }
+            return client.key
+        }
+        return managed.union(local)
+    }
+
+    public func waitForPendingOperation(nonce: String) async {
+        // The action soft deadline never cancels Automation. Its fixed AppleScript timeout
+        // remains the hard bound; this task completes only after the durable late absorb.
+        if let completion = lateCompletions[nonce] {
+            await completion.value
+        }
+    }
+
     public func reconcile(snapshot: RoomSnapshot) async throws -> [ManagedClientRecord] {
         let evidence: [ManagedSessionEvidence]
         switch await automation.enumerateManagedSessions() {
@@ -122,7 +152,7 @@ public final class TerminalController: TerminalControlling {
             return try absorb(completed, nonce: nonce, snapshot: snapshot)
         }
         record.state = .timedOutButRunning; record.updatedAt = Date(); try journal.write(record)
-        Task { @MainActor [weak self] in
+        let lateCompletion = Task { @MainActor [weak self] in
             let result = await task.value
             guard let self else { return }
             self.launches[nonce] = nil
@@ -132,7 +162,9 @@ public final class TerminalController: TerminalControlling {
                 self.persistLateFailure(nonce: nonce, message: message)
                 self.lateFailureHandler(message)
             }
+            self.lateCompletions[nonce] = nil
         }
+        lateCompletions[nonce] = lateCompletion
         return .pending(record)
     }
 

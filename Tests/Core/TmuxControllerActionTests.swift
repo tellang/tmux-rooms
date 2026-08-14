@@ -59,7 +59,7 @@ struct TmuxControllerActionTests {
         let fresh = actionSnapshot(interactiveCount: 0)
         let record = actionRecord(token: fresh.rooms[0].token, role: .preview, state: .timedOutButRunning)
         let terminal = FakeActionTerminal(outcome: .pending(record), reconciled: [record])
-        let loader = ActionSequenceLoader([fresh, fresh])
+        let loader = ActionSequenceLoader([fresh, fresh, fresh])
         let controller = makeActionController(loader: loader, terminal: terminal)
         let token = fresh.rooms[0].token
 
@@ -80,6 +80,32 @@ struct TmuxControllerActionTests {
         #expect(controller.open(fresh.rooms[0].token, route: .detached))
         await actionEventually { controller.phase == .idle }
         #expect(controller.lastActionResult == .terminalFailure(.permissionDenied))
+    }
+
+    @Test("deferred Duplicate owns the flight until late completion and never launches twice")
+    func deferredDuplicateSingleFlight() async throws {
+        let fresh = actionSnapshot(interactiveCount: 0)
+        let terminal = DeferredDuplicateTerminal(token: fresh.rooms[0].token)
+        let loader = ActionSequenceLoader([fresh, fresh, fresh])
+        let controller = TmuxController(
+            socketURL: URL(fileURLWithPath: "/tmp/t7-controller"),
+            loader: loader,
+            deleter: ActionNoopDeleter(),
+            terminal: terminal
+        )
+        let token = fresh.rooms[0].token
+
+        #expect(controller.duplicateWindow(token, softDeadline: .milliseconds(1)))
+        await actionEventually { terminal.waiting }
+        #expect(controller.phase == .reconciling)
+        #expect(controller.duplicateWindow(token, softDeadline: .milliseconds(1)) == false)
+        #expect(terminal.launchCalls == 1)
+
+        terminal.complete()
+        await actionEventually { controller.phase == .idle }
+        #expect(controller.lastActionResult == .succeeded)
+        #expect(terminal.launchCalls == 1)
+        #expect(await loader.callCount == 3)
     }
 }
 
@@ -151,6 +177,53 @@ private final class FakeActionTerminal: TerminalControlling {
         reconcileCalls += 1
         if let error { throw error }
         return reconciled ?? lastRecord.map { [$0] } ?? []
+    }
+
+    func focusableClientKeys(snapshot: RoomSnapshot) async throws -> Set<ClientKey> {
+        Set(snapshot.rooms.flatMap(\.interactiveClients).map(\.key))
+    }
+
+    func waitForPendingOperation(nonce: String) async {}
+}
+
+@MainActor
+private final class DeferredDuplicateTerminal: TerminalControlling {
+    private var record: ManagedClientRecord
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var launchCalls = 0
+    private(set) var waiting = false
+
+    init(token: SessionToken) {
+        record = actionRecord(token: token, role: nil, state: .timedOutButRunning, kind: .explicitDuplicate)
+    }
+
+    func ensureManaged(role: ManagedRole, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration) async throws -> ManagedTerminalOutcome {
+        .pending(record)
+    }
+
+    func launchDuplicate(destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration) async throws -> ManagedTerminalOutcome {
+        launchCalls += 1
+        return .pending(record)
+    }
+
+    func focus(clientKey: ClientKey, snapshot: RoomSnapshot) async throws -> TerminalFocusResult {
+        .external(reference: .init(windowID: 1, tabIndex: 1, sessionGUID: "deferred", tty: clientKey.tty ?? ""), clientKey: clientKey)
+    }
+
+    func reconcile(snapshot: RoomSnapshot) async throws -> [ManagedClientRecord] { [record] }
+    func focusableClientKeys(snapshot: RoomSnapshot) async throws -> Set<ClientKey> { [] }
+
+    func waitForPendingOperation(nonce: String) async {
+        guard record.state != .complete else { return }
+        waiting = true
+        await withCheckedContinuation { continuation = $0 }
+        waiting = false
+    }
+
+    func complete() {
+        record.state = .complete
+        continuation?.resume()
+        continuation = nil
     }
 }
 

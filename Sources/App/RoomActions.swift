@@ -50,7 +50,7 @@ enum AppActionFailure: Sendable, Hashable {
 }
 
 enum AppActionResult: Sendable, Hashable {
-    case succeeded(snapshot: RoomSnapshot?)
+    case succeeded(snapshot: RoomSnapshot?, focusableClients: Set<ClientKey>?)
     case unavailable(AppActionUnavailable)
     case failed(AppActionFailure)
 }
@@ -86,7 +86,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
             controller.requestRefresh()
             await waitUntilIdle()
             if let failure = controller.refreshError { return .failed(.tmux(failure)) }
-            return .succeeded(snapshot: controller.snapshot)
+            return await success(snapshot: controller.snapshot)
         case .delete(let token):
             guard controller.delete(token) else {
                 return .failed(.other("Another room action is still running."))
@@ -95,7 +95,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
             if let failure = controller.refreshError {
                 return .failed(.tmux(failure))
             }
-            return map(controller.lastActionResult, snapshot: controller.snapshot)
+            return await map(controller.lastActionResult, snapshot: controller.snapshot)
         case let .open(token, route):
             guard controller.open(token, route: route) else { return busyResult() }
             return await completedAction()
@@ -113,7 +113,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
     private func completedAction() async -> AppActionResult {
         await waitUntilIdle()
         if let failure = controller.refreshError { return .failed(.tmux(failure)) }
-        return map(controller.lastActionResult, snapshot: controller.snapshot)
+        return await map(controller.lastActionResult, snapshot: controller.snapshot)
     }
 
     private func busyResult() -> AppActionResult {
@@ -126,9 +126,13 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         }
     }
 
-    private func map(_ result: RoomActionResult?, snapshot: RoomSnapshot) -> AppActionResult {
+    private func success(snapshot: RoomSnapshot) async -> AppActionResult {
+        .succeeded(snapshot: snapshot, focusableClients: await controller.focusableClientKeys())
+    }
+
+    private func map(_ result: RoomActionResult?, snapshot: RoomSnapshot) async -> AppActionResult {
         switch result {
-        case .succeeded, .alreadyGone: .succeeded(snapshot: snapshot)
+        case .succeeded, .alreadyGone: await success(snapshot: snapshot)
         case .staleTarget: .failed(.staleTarget)
         case .cancelled: .failed(.other("The action was cancelled."))
         case .tmuxFailure(let failure): .failed(.tmux(failure))

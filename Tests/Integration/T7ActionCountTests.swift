@@ -102,6 +102,12 @@ private final class HarnessActionTerminal: TerminalControlling {
     func reconcile(snapshot: RoomSnapshot) async throws -> [ManagedClientRecord] {
         Array(records.values)
     }
+
+    func focusableClientKeys(snapshot: RoomSnapshot) async throws -> Set<ClientKey> {
+        Set(snapshot.rooms.flatMap(\.interactiveClients).map(\.key))
+    }
+
+    func waitForPendingOperation(nonce: String) async {}
 }
 
 @MainActor

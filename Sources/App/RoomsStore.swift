@@ -232,8 +232,11 @@ final class RoomsStore: ObservableObject {
         let result = await handler.perform(intent)
         guard generation == fixtureGeneration else { return }
         switch result {
-        case .succeeded(let updated):
+        case let .succeeded(updated, focusableClients):
             if let updated { snapshot = updated }
+            if let focusableClients {
+                focusability = Dictionary(uniqueKeysWithValues: focusableClients.map { ($0, .focusable) })
+            }
             issue = nil
         case .unavailable(.terminalWiringPending):
             issue = AppIssue(
