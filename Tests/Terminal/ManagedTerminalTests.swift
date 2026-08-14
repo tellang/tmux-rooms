@@ -429,12 +429,36 @@ func duplicatePolicyBoundary() async throws {
     let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
     let fake = FakeManagedAutomation()
     let controller = TerminalController(automation: fake, journal: journal)
-    _ = try await controller.launchDuplicate(destination: managedToken, readOnly: false, snapshot: .noServer, softDeadline: .seconds(1))
-    _ = try await controller.launchDuplicate(destination: managedToken, readOnly: false, snapshot: .noServer, softDeadline: .seconds(1))
+    _ = try await controller.launchDuplicate(destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .seconds(1))
+    _ = try await controller.launchDuplicate(destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .seconds(1))
     let records = try journal.allRecords()
     #expect(records.count == 2)
     #expect(records.allSatisfy { $0.launchKind == .explicitDuplicate && $0.role == nil })
     #expect(fake.createCalls == 2)
+}
+
+@Test("unresolved explicit Duplicate reuses one nonce and multiple unresolved records fail closed")
+@MainActor
+func unresolvedDuplicateDeduplication() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let fake = FakeManagedAutomation(create: .suspended)
+    let controller = TerminalController(automation: fake, journal: journal)
+    let first = try await controller.launchDuplicate(destination: managedToken, readOnly: false, snapshot: .noServer, softDeadline: .milliseconds(10))
+    guard case let .pending(original) = first else { Issue.record("expected pending Duplicate"); return }
+
+    let second = try await controller.launchDuplicate(destination: managedToken, readOnly: false, snapshot: .noServer, softDeadline: .milliseconds(10))
+    guard case let .pending(reused) = second else { Issue.record("expected reused pending Duplicate"); return }
+    #expect(reused.nonce == original.nonce)
+    #expect(fake.createCalls == 1)
+
+    let conflicting = ManagedClientRecord(nonce: ManagedNonce.generate(), launchKind: .explicitDuplicate, role: nil, requestedSessionToken: managedToken, readOnly: false, state: .completedNeedsReconcile)
+    try journal.write(conflicting)
+    let third = try await controller.launchDuplicate(destination: managedToken, readOnly: false, snapshot: .noServer, softDeadline: .milliseconds(10))
+    guard case let .ambiguous(records) = third else { Issue.record("multiple pending Duplicates must fail closed"); return }
+    #expect(records.count == 2)
+    #expect(fake.createCalls == 1)
+    fake.complete(.failure(.timeout))
+    await controller.waitForPendingOperation(nonce: original.nonce)
 }
 
 @Test("helper CLI and golden command admit only a fixed path plus alphanumeric nonce")

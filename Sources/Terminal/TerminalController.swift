@@ -69,7 +69,20 @@ public final class TerminalController: TerminalControlling {
     }
 
     public func launchDuplicate(destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration = .seconds(5)) async throws -> ManagedTerminalOutcome {
-        try await launch(kind: .explicitDuplicate, role: nil, destination: destination, readOnly: readOnly, snapshot: snapshot, deadline: softDeadline)
+        let unresolvedStates: [ManagedRecordState] = [.provisional, .launching, .timedOutButRunning, .completedNeedsReconcile, .ambiguous]
+        let unresolved = try journal.allRecords().filter {
+            $0.launchKind == .explicitDuplicate
+                && $0.requestedSessionToken == destination
+                && $0.readOnly == readOnly
+                && unresolvedStates.contains($0.state)
+        }
+        if unresolved.count > 1 || unresolved.contains(where: { $0.state == .ambiguous }) {
+            return .ambiguous(unresolved)
+        }
+        if let pending = unresolved.first {
+            return .pending(pending)
+        }
+        return try await launch(kind: .explicitDuplicate, role: nil, destination: destination, readOnly: readOnly, snapshot: snapshot, deadline: softDeadline)
     }
 
     public func focus(clientKey: ClientKey, snapshot: RoomSnapshot) async throws -> TerminalFocusResult {

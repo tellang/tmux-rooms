@@ -59,7 +59,7 @@ struct TmuxControllerActionTests {
         let fresh = actionSnapshot(interactiveCount: 0)
         let record = actionRecord(token: fresh.rooms[0].token, role: .preview, state: .timedOutButRunning)
         let terminal = FakeActionTerminal(outcome: .pending(record), reconciled: [record])
-        let loader = ActionSequenceLoader([fresh, fresh, fresh])
+        let loader = ActionSequenceLoader(Array(repeating: fresh, count: 20))
         let controller = makeActionController(loader: loader, terminal: terminal)
         let token = fresh.rooms[0].token
 
@@ -91,7 +91,8 @@ struct TmuxControllerActionTests {
             socketURL: URL(fileURLWithPath: "/tmp/t7-controller"),
             loader: loader,
             deleter: ActionNoopDeleter(),
-            terminal: terminal
+            terminal: terminal,
+            terminalPolling: .init(interval: .milliseconds(1), deadline: .milliseconds(50))
         )
         let token = fresh.rooms[0].token
 
@@ -106,6 +107,50 @@ struct TmuxControllerActionTests {
         #expect(controller.lastActionResult == .succeeded)
         #expect(terminal.launchCalls == 1)
         #expect(await loader.callCount == 3)
+    }
+
+    @Test("Duplicate remains single-flight across delayed tmux ownership polling")
+    func duplicatePollsUntilOwned() async throws {
+        let fresh = actionSnapshot(interactiveCount: 0)
+        let terminal = DelayedOwnershipTerminal(token: fresh.rooms[0].token, role: nil, completeOnReconcile: 4)
+        let loader = ActionSequenceLoader(Array(repeating: fresh, count: 10))
+        let controller = TmuxController(
+            socketURL: URL(fileURLWithPath: "/tmp/t7-controller"), loader: loader,
+            deleter: ActionNoopDeleter(), terminal: terminal,
+            terminalPolling: .init(interval: .milliseconds(20), deadline: .seconds(1))
+        )
+
+        #expect(controller.duplicateWindow(fresh.rooms[0].token, softDeadline: .milliseconds(1)))
+        await actionEventually { terminal.waiting }
+        terminal.completeAutomation()
+        await actionEventually { terminal.reconcileCalls >= 2 }
+        #expect(controller.phase == .reconciling)
+        #expect(controller.duplicateWindow(fresh.rooms[0].token) == false)
+        #expect(terminal.launchCalls == 1)
+        await actionEventually { controller.phase == .idle }
+        #expect(controller.lastActionResult == .succeeded)
+        #expect(terminal.launchCalls == 1)
+        #expect(terminal.reconcileCalls >= 4)
+    }
+
+    @Test("late Preview ownership focuses exactly once after polling")
+    func previewPollsThenFocusesOnce() async throws {
+        let fresh = actionSnapshot(interactiveCount: 0)
+        let terminal = DelayedOwnershipTerminal(token: fresh.rooms[0].token, role: .preview, completeOnReconcile: 3)
+        let loader = ActionSequenceLoader(Array(repeating: fresh, count: 8))
+        let controller = TmuxController(
+            socketURL: URL(fileURLWithPath: "/tmp/t7-controller"), loader: loader,
+            deleter: ActionNoopDeleter(), terminal: terminal,
+            terminalPolling: .init(interval: .milliseconds(5), deadline: .seconds(1))
+        )
+
+        #expect(controller.preview(fresh.rooms[0].token, softDeadline: .milliseconds(1)))
+        await actionEventually { terminal.waiting }
+        terminal.completeAutomation()
+        await actionEventually { controller.phase == .idle }
+        #expect(controller.lastActionResult == .succeeded)
+        #expect(terminal.ensureCalls == 1)
+        #expect(terminal.focusCalls == 1)
     }
 }
 
@@ -228,12 +273,67 @@ private final class DeferredDuplicateTerminal: TerminalControlling {
 }
 
 @MainActor
+private final class DelayedOwnershipTerminal: TerminalControlling {
+    private var record: ManagedClientRecord
+    private var continuation: CheckedContinuation<Void, Never>?
+    private let completeOnReconcile: Int
+    private(set) var launchCalls = 0
+    private(set) var ensureCalls = 0
+    private(set) var focusCalls = 0
+    private(set) var reconcileCalls = 0
+    private(set) var waiting = false
+
+    init(token: SessionToken, role: ManagedRole?, completeOnReconcile: Int) {
+        self.completeOnReconcile = completeOnReconcile
+        record = actionRecord(token: token, role: role, state: .completedNeedsReconcile, kind: role == nil ? .explicitDuplicate : .reusableRole)
+    }
+
+    func ensureManaged(role: ManagedRole, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration) async throws -> ManagedTerminalOutcome {
+        ensureCalls += 1
+        return .pending(record)
+    }
+
+    func launchDuplicate(destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration) async throws -> ManagedTerminalOutcome {
+        launchCalls += 1
+        return .pending(record)
+    }
+
+    func focus(clientKey: ClientKey, snapshot: RoomSnapshot) async throws -> TerminalFocusResult {
+        focusCalls += 1
+        return .external(reference: .init(windowID: 1, tabIndex: 1, sessionGUID: "late", tty: clientKey.tty ?? ""), clientKey: clientKey)
+    }
+
+    func reconcile(snapshot: RoomSnapshot) async throws -> [ManagedClientRecord] {
+        reconcileCalls += 1
+        if reconcileCalls >= completeOnReconcile {
+            record.state = .complete
+            record.liveClientKey = staleKey(for: record.requestedSessionToken.server)
+        }
+        return [record]
+    }
+
+    func focusableClientKeys(snapshot: RoomSnapshot) async throws -> Set<ClientKey> { [] }
+
+    func waitForPendingOperation(nonce: String) async {
+        waiting = true
+        await withCheckedContinuation { continuation = $0 }
+        waiting = false
+    }
+
+    func completeAutomation() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
 private func makeActionController(loader: ActionSequenceLoader, terminal: FakeActionTerminal) -> TmuxController {
     TmuxController(
         socketURL: URL(fileURLWithPath: "/tmp/t7-controller"),
         loader: loader,
         deleter: ActionNoopDeleter(),
-        terminal: terminal
+        terminal: terminal,
+        terminalPolling: .init(interval: .milliseconds(1), deadline: .milliseconds(3))
     )
 }
 
@@ -263,7 +363,7 @@ private func actionRecord(token: SessionToken, role: ManagedRole?, state: Manage
 private func actionEventually(_ predicate: @escaping @MainActor () -> Bool) async {
     for _ in 0..<2_000 {
         if predicate() { return }
-        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(1))
     }
     Issue.record("condition did not become true")
 }

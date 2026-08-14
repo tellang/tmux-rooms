@@ -14,6 +14,16 @@ public enum TmuxOpenRoute: Sendable, Hashable {
     case chosen(ClientKey)
 }
 
+public struct TerminalActionPolling: Sendable, Hashable {
+    public let interval: Duration
+    public let deadline: Duration
+
+    public init(interval: Duration = .milliseconds(100), deadline: Duration = .seconds(5)) {
+        self.interval = interval
+        self.deadline = deadline
+    }
+}
+
 @MainActor
 @Observable
 public final class TmuxController {
@@ -26,6 +36,7 @@ public final class TmuxController {
     @ObservationIgnored private let loader: any TmuxSnapshotLoading
     @ObservationIgnored private let deleter: any TmuxDeleting
     @ObservationIgnored private let terminal: (any TerminalControlling)?
+    @ObservationIgnored private let terminalPolling: TerminalActionPolling
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var pendingRefresh = false
 
@@ -34,12 +45,14 @@ public final class TmuxController {
         loader: any TmuxSnapshotLoading,
         deleter: any TmuxDeleting,
         terminal: (any TerminalControlling)? = nil,
+        terminalPolling: TerminalActionPolling = .init(),
         initialSnapshot: RoomSnapshot = .noServer
     ) {
         self.socketURL = socketURL
         self.loader = loader
         self.deleter = deleter
         self.terminal = terminal
+        self.terminalPolling = terminalPolling
         self.snapshot = initialSnapshot
     }
 
@@ -158,7 +171,8 @@ public final class TmuxController {
     private func finishTerminalAction(_ progress: TerminalActionProgress, terminal: any TerminalControlling, generation actionGeneration: Int) {
         guard generation == actionGeneration, phase == .acting else { return }
         phase = .reconciling
-        Task { [weak self, loader, socketURL, terminal] in
+        let polling = terminalPolling
+        Task { [weak self, loader, socketURL, terminal, polling] in
             do {
                 let snapshot = try await loader.load(socketURL: socketURL)
                 let result: RoomActionResult
@@ -173,9 +187,15 @@ public final class TmuxController {
                         let initial = try await Self.resolveManaged(nonce: nonce, focusWhenReady: focusWhenReady, terminal: terminal, snapshot: snapshot)
                         if initial == .terminalFailure(.operationPending) {
                             await terminal.waitForPendingOperation(nonce: nonce)
-                            let completedSnapshot = try await loader.load(socketURL: socketURL)
-                            let completed = try await Self.resolveManaged(nonce: nonce, focusWhenReady: focusWhenReady, terminal: terminal, snapshot: completedSnapshot)
-                            self?.finishTerminalReconcile(.success(completedSnapshot), result: completed, generation: actionGeneration)
+                            let polled = try await Self.pollManagedResolution(
+                                nonce: nonce,
+                                focusWhenReady: focusWhenReady,
+                                terminal: terminal,
+                                loader: loader,
+                                socketURL: socketURL,
+                                policy: polling
+                            )
+                            self?.finishTerminalReconcile(.success(polled.snapshot), result: polled.result, generation: actionGeneration)
                             return
                         }
                         result = initial
@@ -234,6 +254,26 @@ public final class TmuxController {
         case .provisional, .launching, .timedOutButRunning, .completedNeedsReconcile:
             return .terminalFailure(.operationPending)
         }
+    }
+
+    private static func pollManagedResolution(
+        nonce: String,
+        focusWhenReady: Bool,
+        terminal: any TerminalControlling,
+        loader: any TmuxSnapshotLoading,
+        socketURL: URL,
+        policy: TerminalActionPolling
+    ) async throws -> (snapshot: RoomSnapshot, result: RoomActionResult) {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: policy.deadline)
+        var latest = try await loader.load(socketURL: socketURL)
+        var result = try await resolveManaged(nonce: nonce, focusWhenReady: focusWhenReady, terminal: terminal, snapshot: latest)
+        while result == .terminalFailure(.operationPending), clock.now < deadline {
+            try await Task.sleep(for: policy.interval)
+            latest = try await loader.load(socketURL: socketURL)
+            result = try await resolveManaged(nonce: nonce, focusWhenReady: focusWhenReady, terminal: terminal, snapshot: latest)
+        }
+        return (latest, result)
     }
 
     private static func roomFailure(_ error: Error) -> RoomActionResult {
