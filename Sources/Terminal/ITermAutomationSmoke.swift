@@ -22,6 +22,7 @@ public enum SmokeAutomationError: Error, Sendable, Codable, Equatable {
     case ambiguous
     case activationNotVerified
     case invalidReply
+    case scriptInstallFailed
     case scriptFailure(number: Int?)
 }
 

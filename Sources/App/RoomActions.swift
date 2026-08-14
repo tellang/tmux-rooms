@@ -247,7 +247,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         case .automation(.staleTarget), .automation(.notFound), .notFound, .staleOwnership: .staleTarget
         case .automation(.scriptFailure(let number)): .terminal(.scriptFailure(number: number))
         case .automation(.ambiguous), .ambiguous: .terminal(.ambiguous)
-        case .automation(.activationNotVerified), .automation(.invalidReply),
+        case .automation(.activationNotVerified), .automation(.invalidReply), .automation(.scriptInstallFailed),
              .invalidNonce, .invalidRecord, .journal, .corruptRecord:
             .terminal(.invalidReply)
         }

@@ -114,51 +114,38 @@ public enum ITermManagedScripts {
         """
     }
 
-    public static func setTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) throws -> String {
-        let guid = try AppleScriptLiteral.string(reference.sessionGUID)
-        let tty = try AppleScriptLiteral.string(reference.tty)
-        let nonce = try AppleScriptLiteral.string(nonce)
-        let title = try AppleScriptLiteral.string(title)
-        return """
-        with timeout of 5 seconds
-            tell application id "com.googlecode.iterm2"
-                set exactMatches to {}
-                repeat with targetWindow in windows
-                    set targetTabIndex to 0
-                    repeat with targetTab in tabs of targetWindow
-                        set targetTabIndex to targetTabIndex + 1
-                        repeat with targetSession in sessions of targetTab
-                            try
-                                set targetNonce to variable targetSession named "user.tmuxRoomsNonce"
-                                if unique ID of targetSession is \(guid) and tty of targetSession is \(tty) and targetNonce is \(nonce) then set end of exactMatches to {targetWindow, targetTabIndex, targetTab, targetSession}
-                            end try
-                        end repeat
-                    end repeat
-                end repeat
-                if (count of exactMatches) is 0 then return {"not-found"}
-                if (count of exactMatches) is greater than 1 then return {"ambiguous"}
-                set exactMatch to item 1 of exactMatches
-                set matchedWindow to item 1 of exactMatch
-                set matchedTabIndex to item 2 of exactMatch
-                set matchedTab to item 3 of exactMatch
-                set matchedSession to item 4 of exactMatch
-                set name of matchedSession to \(title)
-                set title of matchedTab to \(title)
-                return {id of matchedWindow, matchedTabIndex, unique ID of matchedSession, tty of matchedSession, variable matchedSession named "user.tmuxRoomsNonce"}
-            end tell
-        end timeout
-        """
-    }
 }
 
 @MainActor
 public struct ITermManagedAutomation: ManagedITermAutomating {
     private let runner: any AppleScriptRunning
     private let helperPath: ITermBundledHelperPath?
+    private let titleTransport: ITermPythonTitleTransport
     public init(runner: any AppleScriptRunning = FoundationAppleScriptRunner(), bundleURL: URL = Bundle.main.bundleURL, homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
-        self.runner = runner; self.helperPath = try? .resolve(bundleURL: bundleURL, homeDirectory: homeDirectory)
+        self.runner = runner
+        self.helperPath = try? .resolve(bundleURL: bundleURL, homeDirectory: homeDirectory)
+        self.titleTransport = .init(runner: runner, homeDirectory: homeDirectory)
     }
-    public init(runner: any AppleScriptRunning, helperPath: ITermBundledHelperPath) { self.runner = runner; self.helperPath = helperPath }
+    public init(
+        runner: any AppleScriptRunning,
+        helperPath: ITermBundledHelperPath,
+        titleHomeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        titlePollInterval: Duration = .milliseconds(100),
+        titleMaxPollAttempts: Int = 50,
+        titleMaxLaunchAttempts: Int = 30,
+        titleOverallTimeout: Duration = .seconds(8)
+    ) {
+        self.runner = runner
+        self.helperPath = helperPath
+        self.titleTransport = .init(
+            runner: runner,
+            homeDirectory: titleHomeDirectory,
+            pollInterval: titlePollInterval,
+            maxPollAttempts: titleMaxPollAttempts,
+            maxLaunchAttempts: titleMaxLaunchAttempts,
+            overallTimeout: titleOverallTimeout
+        )
+    }
 
     public func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError> {
         switch await runner.execute(source: ITermSmokeScripts.enumerate) {
@@ -194,16 +181,7 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
     }
 
     public func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
-        do {
-            switch await runner.execute(source: try ITermManagedScripts.setTitle(reference, nonce: nonce, title: title)) {
-            case let .failure(number, _): return .failure(map(number))
-            case .success(.list([.string("not-found")])): return .failure(.notFound)
-            case .success(.list([.string("ambiguous")])): return .failure(.ambiguous)
-            case let .success(value):
-                guard let evidence = Self.decodeEvidence(value), evidence.nonce == nonce, evidence.terminal == reference else { return .failure(.staleTarget) }
-                return .success(reference)
-            }
-        } catch { return .failure(.invalidReply) }
+        await titleTransport.setTitle(reference, nonce: nonce, title: title)
     }
 
     public func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {

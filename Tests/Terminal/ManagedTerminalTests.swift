@@ -836,8 +836,7 @@ func managedScriptsCompile() throws {
     let scripts = [
         ITermManagedScripts.enumerate,
         try ITermManagedScripts.create(nonce: nonce, helperPath: helper),
-        try ITermManagedScripts.focus(managedReference, nonce: nonce),
-        try ITermManagedScripts.setTitle(managedReference, nonce: nonce, title: "READ ONLY · next \\\"room\\\"")
+        try ITermManagedScripts.focus(managedReference, nonce: nonce)
     ]
     for source in scripts {
         var error: NSDictionary?

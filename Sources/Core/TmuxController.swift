@@ -289,7 +289,7 @@ public final class TmuxController {
             case .staleTarget: return .terminalFailure(.staleTarget)
             case .notFound: return .terminalFailure(.notFound)
             case .ambiguous: return .terminalFailure(.ambiguous)
-            case .activationNotVerified, .invalidReply: return .terminalFailure(.invalidReply)
+            case .activationNotVerified, .invalidReply, .scriptInstallFailed: return .terminalFailure(.invalidReply)
             case .scriptFailure(let number): return .terminalFailure(.scriptFailure(number: number))
             }
         case .notFound: return .terminalFailure(.notFound)
