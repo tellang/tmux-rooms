@@ -65,6 +65,24 @@ struct RoomsStoreActionTests {
         #expect(handler.intents.count == 1)
         #expect(store.issue?.kind == .terminalUnavailable)
     }
+
+    @Test("recovery routes the exact candidate nonce without selecting an arbitrary room")
+    func exactRecoveryCandidateRoutes() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let handler = RecordingRoomActionHandler(snapshot: snapshot, focusable: [])
+        let store = RoomsStore(snapshot: snapshot, isFixture: false, handler: handler)
+        let nonce = "ExactRecoveryCandidate001"
+
+        store.resolve(candidateNonce: nonce, as: .cleanUp)
+        await appEventually { handler.intents.count == 1 }
+
+        guard case let .resolveManaged(actualNonce, resolution) = handler.intents[0] else {
+            Issue.record("exact recovery intent was not routed")
+            return
+        }
+        #expect(actualNonce == nonce)
+        #expect(resolution == .cleanUp)
+    }
 }
 
 @MainActor

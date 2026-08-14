@@ -82,6 +82,18 @@ struct TmuxControllerActionTests {
         #expect(controller.lastActionResult == .terminalFailure(.permissionDenied))
     }
 
+    @Test("failed managed role enters recovery instead of a stale-target loop")
+    func failedManagedRoleRequiresRecovery() async throws {
+        let fresh = actionSnapshot(interactiveCount: 0)
+        let record = actionRecord(token: fresh.rooms[0].token, role: .primary, state: .failed)
+        let terminal = FakeActionTerminal(outcome: .failed(record), reconciled: [record])
+        let controller = makeActionController(loader: ActionSequenceLoader([fresh, fresh]), terminal: terminal)
+
+        #expect(controller.open(fresh.rooms[0].token, route: .detached))
+        await actionEventually { controller.phase == .idle }
+        #expect(controller.lastActionResult == .terminalFailure(.managedRecoveryRequired))
+    }
+
     @Test("deferred Duplicate owns the flight until late completion and never launches twice")
     func deferredDuplicateSingleFlight() async throws {
         let fresh = actionSnapshot(interactiveCount: 0)

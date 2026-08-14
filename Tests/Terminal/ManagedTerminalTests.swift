@@ -19,13 +19,15 @@ private final class FakeManagedAutomation: ManagedITermAutomating {
     var create: Create
     var evidence: [ManagedSessionEvidence]
     private(set) var createCalls = 0
+    private(set) var createdTitles: [String?] = []
     private var continuation: CheckedContinuation<Result<ManagedTerminalReference, SmokeAutomationError>, Never>?
 
     init(create: Create = .immediate(.success(managedReference)), evidence: [ManagedSessionEvidence] = []) { self.create = create; self.evidence = evidence }
     func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError> { .success(evidence.map(\.terminal)) }
     func enumerateManagedSessions() async -> Result<[ManagedSessionEvidence], SmokeAutomationError> { .success(evidence) }
-    func createManagedSession(nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
+    func createManagedSession(nonce: String, title: String?) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
         createCalls += 1
+        createdTitles.append(title)
         switch create {
         case let .immediate(value): return value
         case .suspended: return await withCheckedContinuation { continuation = $0 }
@@ -109,6 +111,112 @@ func reusableRoleConflictFailsClosed() async throws {
     }
 }
 
+@Test("recovery exposes exact conflicting identities and promotes only the chosen revalidated record")
+@MainActor
+func exactManagedRecoverySelection() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let firstNonce = ManagedNonce.generate(), secondNonce = ManagedNonce.generate()
+    let secondReference = ManagedTerminalReference(windowID: 9, tabIndex: 2, sessionGUID: "GUID-2", tty: "/dev/ttys100")
+    let secondKey = ClientKey(server: managedServer, clientName: "/dev/ttys100", tty: secondReference.tty, clientPID: 41, createdAtUnixSeconds: 7)
+    let snapshot = recoverySnapshot(keys: [(managedKey, false), (secondKey, false)])
+    try journal.write(ManagedClientRecord(nonce: firstNonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey))
+    try journal.write(ManagedClientRecord(nonce: secondNonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: secondReference, supervisorPID: 12, childPID: 13, liveClientKey: secondKey))
+    let controller = TerminalController(
+        automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: firstNonce), .init(terminal: secondReference, nonce: secondNonce)]),
+        journal: journal
+    )
+
+    let candidates = try await controller.managedRecoveryCandidates(snapshot: snapshot)
+    #expect(candidates.map(\.nonce) == [firstNonce, secondNonce].sorted())
+    #expect(candidates.first(where: { $0.nonce == secondNonce })?.terminal == secondReference)
+    #expect(candidates.first(where: { $0.nonce == secondNonce })?.liveClientKey == secondKey)
+
+    let remaining = try await controller.resolveManagedCandidate(nonce: secondNonce, as: .primary, snapshot: snapshot)
+    #expect(try journal.read(nonce: secondNonce)?.role == .primary)
+    #expect(try journal.read(nonce: firstNonce)?.role == nil)
+    #expect(remaining.map(\.nonce) == [firstNonce])
+}
+
+@Test("ambiguous terminal evidence cannot be promoted")
+@MainActor
+func ambiguousEvidenceCannotBePromoted() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey))
+    let evidence = [ManagedSessionEvidence(terminal: managedReference, nonce: nonce), .init(terminal: managedReference, nonce: nonce)]
+    let controller = TerminalController(automation: FakeManagedAutomation(evidence: evidence), journal: journal)
+
+    await #expect(throws: ManagedTerminalError.staleOwnership) {
+        try await controller.resolveManagedCandidate(nonce: nonce, as: .primary, snapshot: managedSnapshot())
+    }
+    #expect(try journal.read(nonce: nonce)?.state == .ambiguous)
+}
+
+@Test("cleanup sends one typed exact-nonce detach and retires artifacts only after completed evidence")
+@MainActor
+func exactManagedCleanup() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: nil, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    try journal.writeConfiguration(.init(nonce: nonce, destination: managedToken, readOnly: false))
+    try journal.atomicWrite(ManagedSupervisorHandshake(nonce: nonce, supervisorPID: 10, childPID: 11, destination: managedToken, readOnly: false), to: journal.handshakeURL(nonce))
+    let supervisor = FakeSupervisorClient()
+    let controller = TerminalController(automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)]), journal: journal, supervisorClient: supervisor)
+
+    #expect(try await controller.cleanUpManagedCandidate(nonce: nonce, snapshot: managedSnapshot()).isEmpty)
+    let requests = await supervisor.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].nonce == nonce)
+    #expect(requests[0].action == .detach)
+    #expect(try journal.read(nonce: nonce) == nil)
+    #expect(!FileManager.default.fileExists(atPath: journal.handshakeURL(nonce).path))
+}
+
+@Test("rejected detach keeps the exact candidate and its journal evidence")
+@MainActor
+func rejectedManagedCleanupKeepsArtifacts() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    let record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: nil, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    try journal.atomicWrite(ManagedSupervisorHandshake(nonce: nonce, supervisorPID: 10, childPID: 11, destination: managedToken, readOnly: false), to: journal.handshakeURL(nonce))
+    let controller = TerminalController(
+        automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)]),
+        journal: journal,
+        supervisorClient: FixedSupervisorClient(status: .rejected, childPID: 11)
+    )
+
+    await #expect(throws: ManagedTerminalError.staleOwnership) {
+        try await controller.cleanUpManagedCandidate(nonce: nonce, snapshot: managedSnapshot())
+    }
+    let retained = try #require(try journal.read(nonce: nonce))
+    #expect(retained.nonce == record.nonce)
+    #expect(retained.terminal == record.terminal)
+    #expect(retained.liveClientKey == record.liveClientKey)
+    #expect(FileManager.default.fileExists(atPath: journal.handshakeURL(nonce).path))
+}
+
+@Test("only a proven-dead non-running provisional artifact can be cleared without detach")
+@MainActor
+func provenDeadArtifactCleanup() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, state: .provisional))
+    let supervisor = FakeSupervisorClient()
+    let controller = TerminalController(automation: FakeManagedAutomation(), journal: journal, supervisorClient: supervisor)
+
+    #expect(try await controller.cleanUpManagedCandidate(nonce: nonce, snapshot: .noServer).isEmpty)
+    #expect(await supervisor.requests.isEmpty)
+    #expect(try journal.read(nonce: nonce) == nil)
+}
+
+private func recoverySnapshot(keys: [(ClientKey, Bool)]) -> RoomSnapshot {
+    .init(server: managedServer, rooms: [.init(token: managedToken, name: "recovery-room", lastActivityAtUnixSeconds: 1, panes: [], clients: keys.map { key, readOnly in
+        .init(key: key, lastActivityAtUnixSeconds: 1, flags: readOnly ? ["read-only"] : [], isReadOnly: readOnly, terminalName: "iTerm2", isControlMode: false)
+    })])
+}
+
 @Test("initial empty reusable role launches exactly once")
 @MainActor
 func initialReusableRoleLaunchesOnce() async throws {
@@ -118,8 +226,45 @@ func initialReusableRoleLaunchesOnce() async throws {
     _ = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
         .ensureManaged(role: .primary, destination: managedToken, readOnly: false, snapshot: managedSnapshot(), softDeadline: .seconds(1))
     #expect(fake.createCalls == 1)
+    #expect(fake.createdTitles == [nil])
     #expect(await supervisor.count == 0)
     #expect(try journal.reusableRecords(role: .primary).count == 1)
+}
+
+@Test("Preview launch carries a visible escaped read-only room title only through Automation")
+@MainActor
+func previewLaunchCarriesRoomTitle() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let fake = FakeManagedAutomation()
+    let room = SessionRoom(token: managedToken, name: "ops \\\"blue\\\" \\\\ desk", lastActivityAtUnixSeconds: 1, panes: [], clients: [])
+    let snapshot = RoomSnapshot(server: managedServer, rooms: [room])
+
+    _ = try await TerminalController(automation: fake, journal: journal)
+        .ensureManaged(role: .preview, destination: managedToken, readOnly: true, snapshot: snapshot, softDeadline: .seconds(1))
+
+    #expect(fake.createdTitles == ["READ ONLY · ops \\\"blue\\\" \\\\ desk"])
+    let configuration = try #require(try journal.reusableRecords(role: .preview).first)
+    #expect(configuration.requestedSessionToken == managedToken)
+    #expect(configuration.readOnly)
+}
+
+@Test("Preview title normalizes unsafe multiline room names and stays bounded")
+@MainActor
+func previewTitleNormalizesUnsafeRoomName() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let fake = FakeManagedAutomation()
+    let unsafe = "line1\nline2\rline3\0" + String(repeating: "🚀", count: 2_000)
+    let room = SessionRoom(token: managedToken, name: unsafe, lastActivityAtUnixSeconds: 1, panes: [], clients: [])
+
+    _ = try await TerminalController(automation: fake, journal: journal)
+        .ensureManaged(role: .preview, destination: managedToken, readOnly: true, snapshot: .init(server: managedServer, rooms: [room]), softDeadline: .seconds(1))
+
+    let title = try #require(fake.createdTitles.first ?? nil)
+    #expect(title.hasPrefix("READ ONLY · line1 line2 line3 "))
+    #expect(!title.contains("\n"))
+    #expect(!title.contains("\r"))
+    #expect(!title.contains("\0"))
+    #expect(title.utf8.count < 4_096)
 }
 
 @Test("initial Automation launch failure preserves its typed cause")
@@ -473,10 +618,12 @@ func helperCommandContract() throws {
     for arguments in [["--supervise", "short"], ["--supervise", "bad/value________________"], ["--supervise", nonce, "extra"], ["--root", "/tmp"]] {
         #expect(throws: ManagedSupervisorFailure.self) { try ManagedSupervisorCLI.parse(arguments: arguments) }
     }
-    let script = try ITermManagedScripts.create(nonce: nonce, helperPath: system)
+    let script = try ITermManagedScripts.create(nonce: nonce, title: "READ ONLY · room \\\"quoted\\\"", helperPath: system)
     #expect(script.contains(ITermManagedScripts.nonceVariable))
     #expect(script.contains(system.path))
     #expect(script.contains("create window with default profile command"))
+    #expect(script.contains("set name of createdSession to \"READ ONLY · room \\\\\\\"quoted\\\\\\\"\""))
+    #expect(script.contains("set title of createdTab to \"READ ONLY · room \\\\\\\"quoted\\\\\\\"\""))
     #expect(!script.contains("write text"))
     #expect(!script.contains(managedToken.sessionID))
     #expect(!script.contains(managedToken.server.canonicalSocketPath))
@@ -490,7 +637,7 @@ func managedAppleScriptFake() async throws {
     let runner = ManagedScriptRunner([.success(value), .success(.list([value]))])
     let helper = try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/Applications/Tmux Rooms.app"))
     let automation = ITermManagedAutomation(runner: runner, helperPath: helper)
-    #expect(await automation.createManagedSession(nonce: nonce) == .success(managedReference))
+    #expect(await automation.createManagedSession(nonce: nonce, title: "READ ONLY · room") == .success(managedReference))
     #expect(await automation.enumerateManagedSessions() == .success([.init(terminal: managedReference, nonce: nonce)]))
 }
 
@@ -503,9 +650,11 @@ private final class ManagedScriptRunner: AppleScriptRunning {
 
 private actor FakeSupervisorClient: ManagedSupervisorRequesting {
     private(set) var count = 0
+    private(set) var requests: [ManagedSupervisorRequest] = []
     func send(_ request: ManagedSupervisorRequest, deadline: Duration) async throws -> ManagedSupervisorResponse {
         count += 1
-        return .init(requestID: request.id, status: .completed, childPID: 77)
+        requests.append(request)
+        return .init(requestID: request.id, status: .completed, childPID: request.action == .detach ? nil : 77)
     }
 }
 

@@ -150,6 +150,74 @@ public final class TerminalController: TerminalControlling {
         return reconciled
     }
 
+    public func managedRecoveryCandidates(snapshot: RoomSnapshot) async throws -> [ManagedRecoveryCandidate] {
+        let records = try await reconcile(snapshot: snapshot).filter { $0.launchKind == .reusableRole }
+        let roleCounts = Dictionary(grouping: records.compactMap(\.role), by: { $0 }).mapValues(\.count)
+        return records.filter { record in
+            record.role == nil
+                || record.state != .complete && record.state != .recovered
+                || record.role.map { roleCounts[$0, default: 0] > 1 } == true
+        }.map { record in
+            ManagedRecoveryCandidate(
+                record: record,
+                roomName: snapshot.rooms.first(where: { $0.token == record.requestedSessionToken })?.name ?? "Unavailable room"
+            )
+        }.sorted { $0.nonce < $1.nonce }
+    }
+
+    public func resolveManagedCandidate(nonce: String, as role: ManagedRole, snapshot: RoomSnapshot) async throws -> [ManagedRecoveryCandidate] {
+        guard ManagedNonce.isValid(nonce) else { throw ManagedTerminalError.invalidNonce }
+        let records = try await reconcile(snapshot: snapshot)
+        guard var selected = records.first(where: { $0.nonce == nonce }), selected.launchKind == .reusableRole else {
+            throw ManagedTerminalError.staleOwnership
+        }
+        guard selected.state == .complete || selected.state == .recovered,
+              selected.terminal != nil,
+              selected.liveClientKey != nil,
+              snapshot.rooms.contains(where: { $0.token == selected.requestedSessionToken }),
+              selected.readOnly == (role == .preview) else {
+            throw ManagedTerminalError.staleOwnership
+        }
+
+        for var conflict in records where conflict.launchKind == .reusableRole && conflict.nonce != nonce && conflict.role == role {
+            conflict.role = nil
+            conflict.state = .ambiguous
+            conflict.updatedAt = Date()
+            try journal.write(conflict)
+        }
+        selected.role = role
+        selected.state = .complete
+        selected.updatedAt = Date()
+        try journal.write(selected)
+        return try await managedRecoveryCandidates(snapshot: snapshot)
+    }
+
+    public func cleanUpManagedCandidate(nonce: String, snapshot: RoomSnapshot) async throws -> [ManagedRecoveryCandidate] {
+        guard ManagedNonce.isValid(nonce) else { throw ManagedTerminalError.invalidNonce }
+        let records = try await reconcile(snapshot: snapshot)
+        guard let record = records.first(where: { $0.nonce == nonce }), record.launchKind == .reusableRole else {
+            throw ManagedTerminalError.staleOwnership
+        }
+        let handshake = try journal.readHandshake(nonce: nonce)
+        let provenDead = (record.state == .provisional || record.state == .failed)
+            && record.terminal == nil && record.supervisorPID == nil && record.childPID == nil && handshake == nil
+            && launches[nonce] == nil && lateCompletions[nonce] == nil
+        if provenDead {
+            try journal.retire(record)
+            return try await managedRecoveryCandidates(snapshot: snapshot)
+        }
+        guard handshake?.nonce == nonce || record.supervisorPID != nil else {
+            throw ManagedTerminalError.staleOwnership
+        }
+        let request = ManagedSupervisorRequest(nonce: nonce, action: .detach)
+        let response = try await supervisorClient.send(request, deadline: .seconds(3))
+        guard response.requestID == request.id, response.status == .completed, response.childPID == nil else {
+            throw ManagedTerminalError.staleOwnership
+        }
+        try journal.retire(record, finalRequestID: request.id)
+        return try await managedRecoveryCandidates(snapshot: snapshot)
+    }
+
     private func launch(kind: ManagedLaunchKind, role: ManagedRole?, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, deadline: Duration) async throws -> ManagedTerminalOutcome {
         let nonce = ManagedNonce.generate()
         var record = ManagedClientRecord(nonce: nonce, launchKind: kind, role: role, requestedSessionToken: destination, readOnly: readOnly)
@@ -157,7 +225,10 @@ public final class TerminalController: TerminalControlling {
         try journal.writeConfiguration(.init(nonce: nonce, tmuxExecutablePath: tmuxExecutablePath, destination: destination, readOnly: readOnly))
         record.configurationState = .written; record.state = .launching; record.updatedAt = Date(); try journal.write(record)
 
-        let task = Task { @MainActor [automation] in await automation.createManagedSession(nonce: nonce) }
+        let previewTitle = role == .preview ? Self.previewTitle(
+            roomName: snapshot.rooms.first(where: { $0.token == destination })?.name ?? destination.sessionID
+        ) : nil
+        let task = Task { @MainActor [automation] in await automation.createManagedSession(nonce: nonce, title: previewTitle) }
         launches[nonce] = task
         let completed = await wait(task, deadline: deadline)
         if let completed {
@@ -289,6 +360,14 @@ public final class TerminalController: TerminalControlling {
         } catch {
             Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal").error("Unable to persist late failure for \(nonce, privacy: .public): \(String(describing: error), privacy: .public); original: \(message, privacy: .public)")
         }
+    }
+
+    private static func previewTitle(roomName: String) -> String {
+        let singleLine = roomName
+            .replacingOccurrences(of: "\0", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+        return "READ ONLY · \(String(singleLine.prefix(512)))"
     }
 }
 

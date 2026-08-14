@@ -199,7 +199,8 @@ private extension AppIssue {
         title: "Managed windows need recovery",
         message: "Choose which candidate owns Primary or Preview, or clean up extras before continuing.",
         diagnostics: "2 Primary candidates · 2 Preview candidates",
-        retry: .none
+        retry: .none,
+        recoveryCandidates: [.primaryRecoveryFixture, .previewRecoveryFixture]
     )
     static let generalFixture = AppIssue(
         kind: .general,
@@ -207,6 +208,36 @@ private extension AppIssue {
         message: "The last good room list is still shown.",
         diagnostics: "Fixture: malformed snapshot",
         retry: .enabled(.refresh)
+    )
+}
+
+private extension ManagedRecoveryCandidate {
+    static let primaryRecoveryFixture = ManagedRecoveryCandidate(
+        record: ManagedClientRecord(
+            nonce: "PrimaryCandidate00000001",
+            launchKind: .reusableRole,
+            role: .primary,
+            requestedSessionToken: Fixtures.room(name: "fixture-room", id: "$1").token,
+            readOnly: false,
+            configurationState: .handshakeObserved,
+            state: .complete,
+            terminal: .init(windowID: 11, tabIndex: 1, sessionGUID: "GUID-PRIMARY", tty: "/dev/ttys011")
+        ),
+        roomName: "fixture-room"
+    )
+
+    static let previewRecoveryFixture = ManagedRecoveryCandidate(
+        record: ManagedClientRecord(
+            nonce: "PreviewCandidate00000001",
+            launchKind: .reusableRole,
+            role: .preview,
+            requestedSessionToken: Fixtures.room(name: "fixture-room", id: "$1").token,
+            readOnly: true,
+            configurationState: .handshakeObserved,
+            state: .complete,
+            terminal: .init(windowID: 12, tabIndex: 1, sessionGUID: "GUID-PREVIEW", tty: "/dev/ttys012")
+        ),
+        roomName: "fixture-room"
     )
 }
 #endif

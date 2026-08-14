@@ -484,13 +484,27 @@ private struct IssueBanner: View {
     @ViewBuilder
     private var recoveryControls: some View {
         if issue.kind == .ambiguousManaged {
-            HStack(spacing: 7) {
-                Button("Use as Primary") { store.resolve(.choosePrimary) }
-                    .accessibilityIdentifier("recovery.choose-primary")
-                Button("Use as Preview") { store.resolve(.choosePreview) }
-                    .accessibilityIdentifier("recovery.choose-preview")
-                Button("Clean Up") { store.resolve(.cleanUp) }
-                    .accessibilityIdentifier("recovery.clean-up")
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(issue.recoveryCandidates) { candidate in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(candidateSummary(candidate))
+                            .font(.custom("SF Mono", size: 9))
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("recovery.candidate.\(candidate.nonce)")
+                        HStack(spacing: 7) {
+                            if isPromotable(candidate) && !candidate.readOnly {
+                                Button("Use as Primary") { store.resolve(candidateNonce: candidate.nonce, as: .choosePrimary) }
+                                    .accessibilityIdentifier("recovery.\(candidate.nonce).choose-primary")
+                            }
+                            if isPromotable(candidate) && candidate.readOnly {
+                                Button("Use as Preview") { store.resolve(candidateNonce: candidate.nonce, as: .choosePreview) }
+                                    .accessibilityIdentifier("recovery.\(candidate.nonce).choose-preview")
+                            }
+                            Button("Clean Up This Candidate") { store.resolve(candidateNonce: candidate.nonce, as: .cleanUp) }
+                                .accessibilityIdentifier("recovery.\(candidate.nonce).clean-up")
+                        }
+                    }
+                }
             }
             .buttonStyle(QuietButtonStyle())
         } else {
@@ -509,6 +523,17 @@ private struct IssueBanner: View {
                     .accessibilityIdentifier("issue.retry")
             }
         }
+    }
+
+    private func candidateSummary(_ candidate: ManagedRecoveryCandidate) -> String {
+        let role = candidate.role?.rawValue ?? "unassigned"
+        let guid = candidate.terminal?.sessionGUID ?? "no-guid"
+        let tty = candidate.terminal?.tty ?? "no-tty"
+        return "\(candidate.roomName) · \(candidate.sessionToken.sessionID) · \(role) · \(candidate.state.rawValue) · nonce \(candidate.nonce) · GUID \(guid) · \(tty)"
+    }
+
+    private func isPromotable(_ candidate: ManagedRecoveryCandidate) -> Bool {
+        candidate.state == .complete || candidate.state == .recovered
     }
 
     private var messageIdentifier: String {

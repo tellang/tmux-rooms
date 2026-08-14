@@ -139,9 +139,14 @@ final class TmuxRoomsUITests: XCTestCase {
 
         switchFixture(to: "v1-ambiguous")
         XCTAssertTrue(waitForExistence(textElement("issue.ambiguous-managed")))
-        XCTAssertTrue(waitForExistence(button("recovery.choose-primary")))
-        XCTAssertTrue(waitForExistence(button("recovery.choose-preview")))
-        XCTAssertTrue(waitForExistence(button("recovery.clean-up")))
+        XCTAssertTrue(waitForExistence(textElement("recovery.candidate.PrimaryCandidate00000001")))
+        XCTAssertTrue(waitForExistence(textElement("recovery.candidate.PreviewCandidate00000001")))
+        XCTAssertTrue(waitForExistence(button("recovery.PrimaryCandidate00000001.choose-primary")))
+        XCTAssertTrue(waitForExistence(button("recovery.PreviewCandidate00000001.choose-preview")))
+        XCTAssertTrue(waitForExistence(button("recovery.PrimaryCandidate00000001.clean-up")))
+        button("recovery.PrimaryCandidate00000001.clean-up").click()
+        XCTAssertTrue(waitForValue("1", at: "fixture.action.count"))
+        XCTAssertTrue(waitForValueContaining("recover clean-up candidate=PrimaryCandidate00000001", at: "fixture.action.last"))
 
         switchFixture(to: "v1-timeout")
         XCTAssertTrue(waitForExistence(textElement("issue.timeout")))

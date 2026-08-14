@@ -225,9 +225,9 @@ public final class TmuxController {
         case .pending(let record):
             return .managed(nonce: record.nonce, focusWhenReady: focusWhenReady)
         case .failed:
-            return .final(.terminalFailure(.notFound))
+            return .final(.terminalFailure(.managedRecoveryRequired))
         case .ambiguous:
-            return .final(.terminalFailure(.ambiguous))
+            return .final(.terminalFailure(.managedRecoveryRequired))
         }
     }
 

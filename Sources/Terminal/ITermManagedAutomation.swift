@@ -4,7 +4,7 @@ import Foundation
 public protocol ManagedITermAutomating: Sendable {
     func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError>
     func enumerateManagedSessions() async -> Result<[ManagedSessionEvidence], SmokeAutomationError>
-    func createManagedSession(nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError>
+    func createManagedSession(nonce: String, title: String?) async -> Result<ManagedTerminalReference, SmokeAutomationError>
     func focusExactSession(_ reference: ManagedTerminalReference) async -> Result<ManagedTerminalReference, SmokeAutomationError>
     func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError>
 }
@@ -60,17 +60,28 @@ public enum ITermManagedScripts {
     end timeout
     """
 
-    public static func create(nonce: String, helperPath: ITermBundledHelperPath) throws -> String {
+    public static func create(nonce: String, title: String?, helperPath: ITermBundledHelperPath) throws -> String {
         let nonceLiteral = try AppleScriptLiteral.string(nonce)
         let commandLiteral = try AppleScriptLiteral.string(command(nonce: nonce, helperPath: helperPath))
+        let titleLines: String
+        if let title {
+            let literal = try AppleScriptLiteral.string(title)
+            titleLines = """
+                set name of createdSession to \(literal)
+                set title of createdTab to \(literal)
+            """
+        } else {
+            titleLines = ""
+        }
         return """
         with timeout of 5 seconds
             tell application id "com.googlecode.iterm2"
                 set createdWindow to create window with default profile command \(commandLiteral)
                 set createdTab to current tab of createdWindow
-                set createdSession to current session of createdTab
-                set variable named "user.tmuxRoomsNonce" of createdSession to \(nonceLiteral)
-                return {id of createdWindow, 1, unique ID of createdSession, tty of createdSession, variable named "user.tmuxRoomsNonce" of createdSession}
+            set createdSession to current session of createdTab
+            set variable named "user.tmuxRoomsNonce" of createdSession to \(nonceLiteral)
+            \(titleLines)
+            return {id of createdWindow, 1, unique ID of createdSession, tty of createdSession, variable named "user.tmuxRoomsNonce" of createdSession}
             end tell
         end timeout
         """
@@ -143,10 +154,10 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
         }
     }
 
-    public func createManagedSession(nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
+    public func createManagedSession(nonce: String, title: String?) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
         do {
             guard let helperPath else { return .failure(.invalidReply) }
-            switch await runner.execute(source: try ITermManagedScripts.create(nonce: nonce, helperPath: helperPath)) {
+            switch await runner.execute(source: try ITermManagedScripts.create(nonce: nonce, title: title, helperPath: helperPath)) {
             case let .failure(number, _): return .failure(map(number))
             case let .success(value):
                 guard let evidence = Self.decodeEvidence(value), evidence.nonce == nonce else { return .failure(.invalidReply) }

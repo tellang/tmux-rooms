@@ -37,6 +37,7 @@ struct AppIssue: Identifiable, Sendable, Hashable {
     let message: String
     let diagnostics: String?
     let retry: Retry
+    var recoveryCandidates: [ManagedRecoveryCandidate] = []
     var id: String { kind.rawValue }
 }
 
@@ -173,9 +174,8 @@ final class RoomsStore: ObservableObject {
         Task { await perform(intent) }
     }
 
-    func resolve(_ resolution: ManagedRecoveryResolution) {
-        guard let room = snapshot.rooms.first else { return }
-        Task { await perform(.resolveManaged(session: room.token, resolution: resolution)) }
+    func resolve(candidateNonce: String, as resolution: ManagedRecoveryResolution) {
+        Task { await perform(.resolveManaged(candidateNonce: candidateNonce, resolution: resolution)) }
     }
 
     func completeFixtureAction() {
@@ -238,14 +238,6 @@ final class RoomsStore: ObservableObject {
                 focusability = Dictionary(uniqueKeysWithValues: focusableClients.map { ($0, .focusable) })
             }
             issue = nil
-        case .unavailable(.terminalWiringPending):
-            issue = AppIssue(
-                kind: .terminalUnavailable,
-                title: "Terminal action not connected yet",
-                message: "Inventory and safe Delete work now. Open, Preview, and Duplicate connect through the T7 TerminalBridge seam.",
-                diagnostics: nil,
-                retry: .none
-            )
         case .unavailable(.clientCannotBeFocused):
             issue = AppIssue(kind: .terminalUnavailable, title: "Client unavailable", message: "The selected client cannot be focused.", diagnostics: nil, retry: .none)
         case .failed(let failure):
@@ -263,8 +255,17 @@ final class RoomsStore: ObservableObject {
             AppIssue(kind: .staleTarget, title: "The room changed", message: "The original server-scoped target is stale. Refresh before choosing the room again.", diagnostics: nil, retry: .enabled(.refresh))
         case .timeout(let running):
             AppIssue(kind: .timeout, title: "iTerm is taking longer than expected", message: running ? "The underlying request is still running; its late result will be reconciled." : "The request timed out.", diagnostics: nil, retry: running ? .blockedWhileRunning : .enabled(intent))
-        case .ambiguousManaged:
-            AppIssue(kind: .ambiguousManaged, title: "Managed windows need recovery", message: "More than one candidate could be the managed Primary or Preview. Choose an owner or clean up extras before opening another.", diagnostics: nil, retry: .none)
+        case .ambiguousManaged(let candidates):
+            AppIssue(
+                kind: .ambiguousManaged,
+                title: "Managed windows need recovery",
+                message: candidates.isEmpty
+                    ? "Candidate ownership could not be revalidated. Refresh before trying again."
+                    : "Choose an exact candidate owner or clean up that exact extra before opening another.",
+                diagnostics: candidates.isEmpty ? "No revalidated candidates" : "\(candidates.count) revalidated candidate(s)",
+                retry: .none,
+                recoveryCandidates: candidates
+            )
         case .tmux(let failure):
             AppIssue(kind: .general, title: "Could not refresh tmux", message: "The last good room list is still shown.", diagnostics: String(describing: failure), retry: .enabled(.refresh))
         case .terminal(let failure):

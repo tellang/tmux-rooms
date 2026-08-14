@@ -9,7 +9,7 @@ enum RoomActionIntent: Sendable, Hashable {
     case preview(session: SessionToken)
     case duplicateWindow(session: SessionToken)
     case delete(session: SessionToken)
-    case resolveManaged(session: SessionToken, resolution: ManagedRecoveryResolution)
+    case resolveManaged(candidateNonce: String, resolution: ManagedRecoveryResolution)
 
     var fixtureSummary: String {
         switch self {
@@ -23,7 +23,7 @@ enum RoomActionIntent: Sendable, Hashable {
         case .preview: "preview"
         case .duplicateWindow: "duplicate-window"
         case .delete: "delete"
-        case .resolveManaged(_, let resolution): "recover \(resolution.rawValue)"
+        case .resolveManaged(let nonce, let resolution): "recover \(resolution.rawValue) candidate=\(nonce)"
         }
     }
 }
@@ -35,7 +35,6 @@ enum ManagedRecoveryResolution: String, Sendable, Hashable {
 }
 
 enum AppActionUnavailable: Sendable, Hashable {
-    case terminalWiringPending
     case clientCannotBeFocused
 }
 
@@ -43,7 +42,7 @@ enum AppActionFailure: Sendable, Hashable {
     case automationDenied
     case staleTarget
     case timeout(underlyingOperationRunning: Bool)
-    case ambiguousManaged
+    case ambiguousManaged([ManagedRecoveryCandidate])
     case tmux(TmuxFailure)
     case terminal(TerminalFailure)
     case other(String)
@@ -63,6 +62,7 @@ protocol RoomActionHandling: AnyObject {
 @MainActor
 final class ProductionRoomActionHandler: RoomActionHandling {
     private let controller: TmuxController
+    private let terminal: TerminalController
 
     init() {
         let loader = TmuxSnapshotLoader()
@@ -72,11 +72,13 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         } catch {
             socket = URL(fileURLWithPath: "/tmp/tmux-\(getuid())/default")
         }
+        let terminal = TerminalController()
+        self.terminal = terminal
         controller = TmuxController(
             socketURL: socket,
             loader: loader,
             deleter: TmuxDeleteExecutor(snapshotLoader: loader),
-            terminal: TerminalController()
+            terminal: terminal
         )
     }
 
@@ -105,8 +107,30 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         case let .duplicateWindow(token):
             guard controller.duplicateWindow(token) else { return busyResult() }
             return await completedAction()
-        case .resolveManaged:
-            return .unavailable(.terminalWiringPending)
+        case let .resolveManaged(nonce, resolution):
+            do {
+                controller.requestRefresh()
+                await waitUntilIdle()
+                if let failure = controller.refreshError { return .failed(.tmux(failure)) }
+                let candidates: [ManagedRecoveryCandidate]
+                switch resolution {
+                case .choosePrimary:
+                    _ = try await terminal.resolveManagedCandidate(nonce: nonce, as: .primary, snapshot: controller.snapshot)
+                case .choosePreview:
+                    _ = try await terminal.resolveManagedCandidate(nonce: nonce, as: .preview, snapshot: controller.snapshot)
+                case .cleanUp:
+                    _ = try await terminal.cleanUpManagedCandidate(nonce: nonce, snapshot: controller.snapshot)
+                }
+                controller.requestRefresh()
+                await waitUntilIdle()
+                if let failure = controller.refreshError { return .failed(.tmux(failure)) }
+                candidates = try await terminal.managedRecoveryCandidates(snapshot: controller.snapshot)
+                return candidates.isEmpty
+                    ? await success(snapshot: controller.snapshot)
+                    : .failed(.ambiguousManaged(candidates))
+            } catch {
+                return await mapRecovery(error)
+            }
         }
     }
 
@@ -140,9 +164,25 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         case .terminalFailure(.staleTarget), .terminalFailure(.notFound): .failed(.staleTarget)
         case .terminalFailure(.timeout): .failed(.timeout(underlyingOperationRunning: false))
         case .terminalFailure(.operationPending): .failed(.timeout(underlyingOperationRunning: true))
-        case .terminalFailure(.ambiguous): .failed(.ambiguousManaged)
+        case .terminalFailure(.ambiguous):
+            .failed(.ambiguousManaged((try? await terminal.managedRecoveryCandidates(snapshot: snapshot)) ?? []))
+        case .terminalFailure(.managedRecoveryRequired):
+            .failed(.ambiguousManaged((try? await terminal.managedRecoveryCandidates(snapshot: snapshot)) ?? []))
         case .terminalFailure(let failure): .failed(.terminal(failure))
         case nil: .failed(.other("The action completed without a result."))
         }
+    }
+
+    private func mapRecovery(_ error: Error) async -> AppActionResult {
+        if let failure = error as? ManagedTerminalError {
+            switch failure {
+            case .staleOwnership, .notFound: return .failed(.staleTarget)
+            case .ambiguous: return .failed(.ambiguousManaged((try? await terminal.managedRecoveryCandidates(snapshot: controller.snapshot)) ?? []))
+            case .automation(.permissionDenied): return .failed(.automationDenied)
+            case .automation(.timeout): return .failed(.timeout(underlyingOperationRunning: false))
+            default: return .failed(.terminal(.invalidReply))
+            }
+        }
+        return .failed(.other(String(describing: error)))
     }
 }

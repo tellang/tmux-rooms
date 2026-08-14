@@ -73,6 +73,19 @@ public struct ManagedClientJournal: Sendable {
         return try decoder.decode(ManagedSupervisorResponse.self, from: Data(contentsOf: url))
     }
 
+    public func retire(_ record: ManagedClientRecord, finalRequestID: UUID? = nil) throws {
+        var urls = [configurationURL(record.nonce), handshakeURL(record.nonce)]
+        let requestIDs = [record.requestID, record.pendingSwitch?.requestID, finalRequestID].compactMap { $0 }
+        for id in Set(requestIDs) {
+            urls.append(requestsDirectory.appending(path: "\(id.uuidString).json"))
+            urls.append(responsesDirectory.appending(path: "\(id.uuidString).json"))
+        }
+        urls.append(recordURL(record.nonce))
+        for url in urls where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     public var requestsDirectory: URL { root.appending(path: "requests", directoryHint: .isDirectory) }
     public var responsesDirectory: URL { root.appending(path: "responses", directoryHint: .isDirectory) }
     private var recordsDirectory: URL { root.appending(path: "records", directoryHint: .isDirectory) }

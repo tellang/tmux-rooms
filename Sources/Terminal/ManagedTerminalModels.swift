@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ManagedRole: String, Sendable, Codable, CaseIterable {
+public enum ManagedRole: String, Sendable, Codable, CaseIterable, Hashable {
     case primary
     case preview
 }
@@ -10,7 +10,7 @@ public enum ManagedLaunchKind: String, Sendable, Codable {
     case explicitDuplicate
 }
 
-public enum ManagedRecordState: String, Sendable, Codable {
+public enum ManagedRecordState: String, Sendable, Codable, Hashable {
     case provisional
     case launching
     case timedOutButRunning
@@ -27,7 +27,7 @@ public enum ManagedConfigurationState: String, Sendable, Codable {
     case handshakeObserved
 }
 
-public struct ManagedTerminalReference: Sendable, Codable, Equatable {
+public struct ManagedTerminalReference: Sendable, Codable, Equatable, Hashable {
     public let windowID: Int
     public let tabIndex: Int
     public let sessionGUID: String
@@ -112,6 +112,30 @@ public enum ManagedTerminalOutcome: Sendable, Equatable {
     case pending(ManagedClientRecord)
     case failed(ManagedClientRecord)
     case ambiguous([ManagedClientRecord])
+}
+
+public struct ManagedRecoveryCandidate: Identifiable, Sendable, Equatable, Hashable {
+    public let nonce: String
+    public let role: ManagedRole?
+    public let sessionToken: SessionToken
+    public let roomName: String
+    public let readOnly: Bool
+    public let state: ManagedRecordState
+    public let terminal: ManagedTerminalReference?
+    public let liveClientKey: ClientKey?
+
+    public var id: String { nonce }
+
+    public init(record: ManagedClientRecord, roomName: String) {
+        nonce = record.nonce
+        role = record.role
+        sessionToken = record.requestedSessionToken
+        self.roomName = roomName
+        readOnly = record.readOnly
+        state = record.state
+        terminal = record.terminal
+        liveClientKey = record.liveClientKey
+    }
 }
 
 public enum TerminalFocusResult: Sendable, Equatable {

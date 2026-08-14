@@ -83,6 +83,7 @@ public enum TerminalFailure: Error, Sendable, Hashable {
     case staleTarget
     case notFound
     case ambiguous
+    case managedRecoveryRequired
     case invalidReply
     case scriptFailure(number: Int?)
 }
