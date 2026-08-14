@@ -95,6 +95,9 @@ final class ProductionRoomActionHandler: RoomActionHandling {
                 return .failed(.other("Another room action is still running."))
             }
             await waitUntilIdle()
+            if let failure = controller.refreshError {
+                return .failed(.tmux(failure))
+            }
             return map(controller.lastActionResult, snapshot: controller.snapshot)
         case .open, .preview, .duplicateWindow, .resolveManaged:
             // T7 replaces this explicit seam with TerminalBridge wiring.

@@ -46,6 +46,7 @@ enum UIFixture: String, CaseIterable {
             focusability: definition.focusability,
             fixtureDefaultFocusability: .focusable,
             fixtureBlocksActions: definition.blocksActions,
+            fixtureIdentifier: rawValue,
             isFixture: true,
             handler: FixtureRoomActionHandler(snapshot: definition.snapshot)
         )
@@ -61,7 +62,13 @@ enum UIFixture: String, CaseIterable {
             diagnostics: nil,
             retry: .none
         )
-        return RoomsStore(snapshot: snapshot, issue: issue, isFixture: true, handler: FixtureRoomActionHandler(snapshot: snapshot))
+        return RoomsStore(
+            snapshot: snapshot,
+            issue: issue,
+            fixtureIdentifier: value,
+            isFixture: true,
+            handler: FixtureRoomActionHandler(snapshot: snapshot)
+        )
     }
 
     private var definition: Definition {

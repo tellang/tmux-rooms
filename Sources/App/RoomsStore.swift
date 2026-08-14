@@ -61,14 +61,18 @@ final class RoomsStore: ObservableObject {
     @Published private(set) var fixtureLastAction = "none"
     @Published private(set) var fixtureActionPending = false
     @Published private(set) var fixtureMaxConcurrentActions = 0
+    #if DEBUG
+    @Published private(set) var fixtureIdentifier: String?
+    #endif
 
     let isFixture: Bool
-    private let handler: any RoomActionHandling
-    private let focusability: [ClientKey: ClientFocusability]
-    private let fixtureDefaultFocusability: ClientFocusability?
-    private let fixtureBlocksActions: Bool
+    private var handler: any RoomActionHandling
+    private var focusability: [ClientKey: ClientFocusability]
+    private var fixtureDefaultFocusability: ClientFocusability?
+    private var fixtureBlocksActions: Bool
     private var fixtureActiveActions = 0
     private var fixtureGate: CheckedContinuation<Void, Never>?
+    private var fixtureGeneration = 0
 
     init(
         snapshot: RoomSnapshot,
@@ -77,6 +81,7 @@ final class RoomsStore: ObservableObject {
         focusability: [ClientKey: ClientFocusability] = [:],
         fixtureDefaultFocusability: ClientFocusability? = nil,
         fixtureBlocksActions: Bool = false,
+        fixtureIdentifier: String? = nil,
         isFixture: Bool,
         handler: any RoomActionHandling
     ) {
@@ -86,6 +91,9 @@ final class RoomsStore: ObservableObject {
         self.focusability = focusability
         self.fixtureDefaultFocusability = fixtureDefaultFocusability
         self.fixtureBlocksActions = fixtureBlocksActions
+        #if DEBUG
+        self.fixtureIdentifier = fixtureIdentifier
+        #endif
         self.isFixture = isFixture
         self.handler = handler
     }
@@ -177,8 +185,36 @@ final class RoomsStore: ObservableObject {
         fixtureGate.resume()
     }
 
+    #if DEBUG
+    func resetFixture(with replacement: RoomsStore) {
+        guard isFixture, replacement.isFixture else { return }
+
+        fixtureGeneration += 1
+        if let fixtureGate {
+            self.fixtureGate = nil
+            fixtureGate.resume()
+        }
+        snapshot = replacement.snapshot
+        phase = replacement.phase
+        issue = replacement.issue
+        chooser = nil
+        deleteConfirmation = nil
+        handler = replacement.handler
+        focusability = replacement.focusability
+        fixtureDefaultFocusability = replacement.fixtureDefaultFocusability
+        fixtureBlocksActions = replacement.fixtureBlocksActions
+        fixtureActionCount = 0
+        fixtureLastAction = "none"
+        fixtureActionPending = false
+        fixtureMaxConcurrentActions = 0
+        fixtureActiveActions = 0
+        fixtureIdentifier = replacement.fixtureIdentifier
+    }
+    #endif
+
     private func perform(_ intent: RoomActionIntent) async {
         guard phase == .idle else { return }
+        let generation = fixtureGeneration
         if isFixture {
             fixtureActionCount += 1
             fixtureLastAction = intent.fixtureSummary
@@ -192,7 +228,9 @@ final class RoomsStore: ObservableObject {
                 fixtureActionPending = true
             }
         }
+        guard generation == fixtureGeneration else { return }
         let result = await handler.perform(intent)
+        guard generation == fixtureGeneration else { return }
         switch result {
         case .succeeded(let updated):
             if let updated { snapshot = updated }

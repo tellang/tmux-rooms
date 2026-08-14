@@ -15,7 +15,6 @@ private enum Palette {
 
 struct RoomsRootView: View {
     @ObservedObject var store: RoomsStore
-    @State private var fixtureKeyMonitor: Any?
 
     var body: some View {
         ZStack {
@@ -35,6 +34,11 @@ struct RoomsRootView: View {
                 DeleteConfirmationSheet(store: store, context: context)
                     .transition(.scale(scale: 0.97).combined(with: .opacity))
             }
+            #if DEBUG
+            if store.fixtureActionPending {
+                FixtureActionGate(store: store)
+            }
+            #endif
         }
         .frame(width: 480, height: 660)
         .background(Palette.canvas)
@@ -42,8 +46,14 @@ struct RoomsRootView: View {
         .preferredColorScheme(.dark)
         .animation(.easeOut(duration: 0.16), value: store.chooser?.id)
         .animation(.easeOut(duration: 0.16), value: store.deleteConfirmation?.id)
-        .onAppear { installFixtureKeyMonitorIfNeeded() }
-        .onDisappear { removeFixtureKeyMonitor() }
+        #if DEBUG
+        .transaction { transaction in
+            if store.isFixture {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
+        #endif
     }
 
     private var header: some View {
@@ -137,6 +147,9 @@ struct RoomsRootView: View {
                 HStack(spacing: 6) {
                     Text("FIXTURE v1")
                         .foregroundStyle(Palette.amber)
+                    Text(store.fixtureIdentifier ?? "unknown")
+                        .lineLimit(1)
+                        .accessibilityIdentifier("fixture.current")
                     Spacer()
                     Text("\(store.fixtureActionCount)")
                         .accessibilityIdentifier("fixture.action.count")
@@ -149,15 +162,9 @@ struct RoomsRootView: View {
                 }
                 .font(.custom("SF Mono Medium", size: 10))
                 if store.fixtureActionPending {
-                    HStack {
-                        Text("pending")
-                            .accessibilityIdentifier("fixture.action.pending")
-                        Spacer()
-                        Button("Complete fixture action") { store.completeFixtureAction() }
-                            .buttonStyle(QuietButtonStyle())
-                            .accessibilityIdentifier("fixture.action.complete")
-                    }
-                    .font(.custom("SF Mono Medium", size: 10))
+                    Text("pending")
+                        .accessibilityIdentifier("fixture.action.pending")
+                        .font(.custom("SF Mono Medium", size: 10))
                 } else {
                     Text("idle")
                         .font(.custom("SF Mono Medium", size: 10))
@@ -178,23 +185,26 @@ struct RoomsRootView: View {
             .accessibilityHidden(true)
     }
 
-    private func installFixtureKeyMonitorIfNeeded() {
-        guard store.isFixture, fixtureKeyMonitor == nil else { return }
-        fixtureKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            guard event.keyCode == 36, modifiers.isEmpty,
-                  store.phase == .idle, let room = store.snapshot.rooms.first else { return event }
-            store.open(room)
-            return nil
-        }
-    }
+}
 
-    private func removeFixtureKeyMonitor() {
-        guard let fixtureKeyMonitor else { return }
-        NSEvent.removeMonitor(fixtureKeyMonitor)
-        self.fixtureKeyMonitor = nil
+#if DEBUG
+private struct FixtureActionGate: View {
+    @ObservedObject var store: RoomsStore
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("Fixture action held")
+                .font(.custom("Avenir Next Demi Bold", size: 12))
+            Button("Complete fixture action") { store.completeFixtureAction() }
+                .buttonStyle(PrimaryActionButtonStyle())
+                .accessibilityIdentifier("fixture.action.complete")
+        }
+        .padding(16)
+        .background(Palette.raised, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.line))
     }
 }
+#endif
 
 private struct RoomRow: View {
     @ObservedObject var store: RoomsStore
@@ -265,6 +275,7 @@ private struct RoomRow: View {
                     .accessibilityHint(openHint)
                     .accessibilityIdentifier("room.\(roomID).open")
                     .focusable()
+                    .fixtureDefaultAction(store.isFixture)
                     .disabled(store.phase != .idle)
                 Button("Preview") { store.preview(room) }
                     .buttonStyle(SecondaryActionButtonStyle())
@@ -284,7 +295,7 @@ private struct RoomRow: View {
                 .disabled(store.phase != .idle)
             }
 
-            if showsMore || store.isFixture {
+            if showsMore {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Duplicate adds another view of this room. Edits are shared; no session is cloned.")
                         .font(.custom("Avenir Next Medium", size: 10))
@@ -607,5 +618,16 @@ private struct ClientChoiceButtonStyle: ButtonStyle {
             .background(Palette.raised.opacity(configuration.isPressed ? 0.72 : 1), in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Palette.line))
             .opacity(configuration.isPressed ? 0.8 : 1)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func fixtureDefaultAction(_ enabled: Bool) -> some View {
+        if enabled {
+            keyboardShortcut(.defaultAction)
+        } else {
+            self
+        }
     }
 }

@@ -5,6 +5,7 @@ import TmuxRoomsCore
 @main
 struct TmuxRoomsApp: App {
     @StateObject private var store: RoomsStore
+    @State private var menuBarExtraInserted: Bool
     private let fixtureWindowEnabled: Bool
 
     init() {
@@ -12,14 +13,17 @@ struct TmuxRoomsApp: App {
         if let value = ProcessInfo.processInfo.environment["TMUX_ROOMS_UI_FIXTURE"] {
             let fixtureStore = UIFixture(rawValue: value)?.makeStore() ?? UIFixture.invalidStore(value)
             _store = StateObject(wrappedValue: fixtureStore)
+            _menuBarExtraInserted = State(initialValue: false)
             fixtureWindowEnabled = true
         } else {
             _store = StateObject(wrappedValue: RoomsStore.production())
+            _menuBarExtraInserted = State(initialValue: true)
             fixtureWindowEnabled = false
         }
         #else
         // Release intentionally does not read TMUX_ROOMS_UI_FIXTURE.
         _store = StateObject(wrappedValue: RoomsStore.production())
+        _menuBarExtraInserted = State(initialValue: true)
         fixtureWindowEnabled = false
         configureReleaseAutomationSmoke()
         #endif
@@ -27,7 +31,7 @@ struct TmuxRoomsApp: App {
 
     @SceneBuilder
     var body: some Scene {
-        MenuBarExtra("Tmux Rooms", systemImage: "rectangle.stack") {
+        MenuBarExtra("Tmux Rooms", systemImage: "rectangle.stack", isInserted: $menuBarExtraInserted) {
             RoomsRootView(store: store)
         }
         .menuBarExtraStyle(.window)
@@ -65,6 +69,8 @@ struct TmuxRoomsApp: App {
 }
 
 #if DEBUG
+private let fixtureSwitchNotification = Notification.Name("com.tellang.tmuxrooms.ui-fixture.switch")
+
 private struct FixtureWindowScene: Scene {
     @ObservedObject var store: RoomsStore
     let isEnabled: Bool
@@ -76,6 +82,13 @@ private struct FixtureWindowScene: Scene {
                     RoomsRootView(store: store)
                         .onAppear {
                             NSApplication.shared.activate(ignoringOtherApps: true)
+                        }
+                        .onReceive(DistributedNotificationCenter.default().publisher(for: fixtureSwitchNotification)) { notification in
+                            guard ProcessInfo.processInfo.arguments.contains("--ui-testing"),
+                                  let rawValue = notification.object as? String,
+                                  let fixture = UIFixture(rawValue: rawValue)
+                            else { return }
+                            store.resetFixture(with: fixture.makeStore())
                         }
                 } else {
                     EmptyView()
