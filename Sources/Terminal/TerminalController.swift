@@ -41,15 +41,18 @@ public final class TerminalController: TerminalControlling {
         }
         if candidates.count > 1 || candidates.contains(where: { $0.state == .ambiguous }) { return .ambiguous(candidates) }
         guard let candidate = candidates.first else { throw ManagedTerminalError.invalidRecord }
-        if candidate.state == .failed { return .failed(candidate) }
         if candidate.pendingSwitch == nil, [.launching, .timedOutButRunning, .provisional].contains(candidate.state) {
             return .pending(candidate)
         }
-        _ = try await reconcile(snapshot: snapshot)
+        let reconciled = try await reconcileDetailed(snapshot: snapshot)
         candidates = try journal.reusableRecords(role: role)
         guard candidates.count == 1, let existing = candidates.first else { return .ambiguous(candidates) }
         if existing.state == .ambiguous { return .ambiguous(candidates) }
-        if existing.state == .failed { return .failed(existing) }
+        if existing.state == .failed {
+            let windowStillOpen = reconciled.evidence.contains { $0.nonce == existing.nonce }
+            guard !windowStillOpen, try retireIfProvablyGone(existing, snapshot: snapshot) else { return .failed(existing) }
+            return try await launch(kind: .reusableRole, role: role, destination: destination, readOnly: readOnly, snapshot: snapshot, deadline: softDeadline)
+        }
         if existing.pendingSwitch != nil { return .pending(existing) }
         if [.launching, .timedOutButRunning, .completedNeedsReconcile, .provisional].contains(existing.state) { return .pending(existing) }
         guard existing.state == .complete || existing.state == .recovered else { return .pending(existing) }
@@ -140,6 +143,13 @@ public final class TerminalController: TerminalControlling {
     }
 
     public func reconcile(snapshot: RoomSnapshot) async throws -> [ManagedClientRecord] {
+        try await reconcileDetailed(snapshot: snapshot).records
+    }
+
+    /// Same pass as `reconcile`, but hands back the terminal evidence it already
+    /// paid an Apple Event for. Callers that need to know whether a window is
+    /// still open must not buy that answer with a second round trip.
+    private func reconcileDetailed(snapshot: RoomSnapshot) async throws -> (records: [ManagedClientRecord], evidence: [ManagedSessionEvidence]) {
         let evidence: [ManagedSessionEvidence]
         switch await automation.enumerateManagedSessions() {
         case let .success(value): evidence = value
@@ -170,7 +180,7 @@ public final class TerminalController: TerminalControlling {
             }
             reconciled.append(resolved)
         }
-        return reconciled
+        return (reconciled, evidence)
     }
 
     public func managedRecoveryCandidates(snapshot: RoomSnapshot) async throws -> [ManagedRecoveryCandidate] {
@@ -234,25 +244,8 @@ public final class TerminalController: TerminalControlling {
             throw ManagedTerminalError.staleOwnership
         }
         let handshake = try journal.readHandshake(nonce: nonce)
-        // A record keeps naming its supervisor, child, and iTerm session long
-        // after all three are gone — the tmux server restarts, the terminal
-        // quits, the machine reboots — and reconcile() re-reads those same PIDs
-        // out of the handshake on every pass. Ownership therefore has to be
-        // proven by live processes and a live client, never by the mere
-        // presence of those fields: otherwise cleanup mails a detach request to
-        // a supervisor that cannot answer, times out, leaves the record in
-        // place, and the recovery panel has no exit at all.
-        let supervisorGone = record.supervisorPID.map { liveness.isDefinitelyDead($0) } ?? true
-        let childGone = record.childPID.map { liveness.isDefinitelyDead($0) } ?? true
-        let handshakeGone = handshake.map {
-            liveness.isDefinitelyDead($0.supervisorPID) && liveness.isDefinitelyDead($0.childPID)
-        } ?? true
-        let clientAttached = record.liveClientKey.map { key in
-            snapshot.rooms.contains { $0.clients.contains { $0.key == key } }
-        } ?? false
-        let provenDead = (record.state == .provisional || record.state == .failed)
-            && supervisorGone && childGone && handshakeGone && !clientAttached
-            && launches[nonce] == nil && lateCompletions[nonce] == nil
+        let provenDead = try (record.state == .provisional || record.state == .failed)
+            && isProvablyGone(record, snapshot: snapshot)
         if provenDead {
             try journal.retire(record)
             return try await managedRecoveryCandidates(snapshot: snapshot)
@@ -267,6 +260,39 @@ public final class TerminalController: TerminalControlling {
         }
         try journal.retire(record, finalRequestID: request.id)
         return try await managedRecoveryCandidates(snapshot: snapshot)
+    }
+
+    /// Whether nothing is left that could still be driving this record: no live
+    /// supervisor, no live tmux child, no attached client, and no flight this
+    /// process is still holding.
+    ///
+    /// A record keeps naming its supervisor, child, and iTerm session long after
+    /// all three are gone — the window is closed, the tmux server restarts, the
+    /// machine reboots — and `reconcile()` re-reads those same PIDs out of the
+    /// handshake on every pass. Ownership therefore has to be proven by live
+    /// processes, never by the mere presence of those fields.
+    private func isProvablyGone(_ record: ManagedClientRecord, snapshot: RoomSnapshot) throws -> Bool {
+        let handshake = try journal.readHandshake(nonce: record.nonce)
+        let supervisorGone = record.supervisorPID.map { liveness.isDefinitelyDead($0) } ?? true
+        let childGone = record.childPID.map { liveness.isDefinitelyDead($0) } ?? true
+        let handshakeGone = handshake.map {
+            liveness.isDefinitelyDead($0.supervisorPID) && liveness.isDefinitelyDead($0.childPID)
+        } ?? true
+        let clientAttached = record.liveClientKey.map { key in
+            snapshot.rooms.contains { $0.clients.contains { $0.key == key } }
+        } ?? false
+        return supervisorGone && childGone && handshakeGone && !clientAttached
+            && launches[record.nonce] == nil && lateCompletions[record.nonce] == nil
+    }
+
+    /// Closing a managed window is an ordinary thing to do. Once nothing the
+    /// record names is left alive there is no ownership left to recover, so
+    /// retire it and let the caller launch a fresh client — otherwise the next
+    /// Open or Preview parks the user in a recovery panel for good.
+    private func retireIfProvablyGone(_ record: ManagedClientRecord, snapshot: RoomSnapshot) throws -> Bool {
+        guard try isProvablyGone(record, snapshot: snapshot) else { return false }
+        try journal.retire(record)
+        return true
     }
 
     private func launch(kind: ManagedLaunchKind, role: ManagedRole?, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, deadline: Duration) async throws -> ManagedTerminalOutcome {

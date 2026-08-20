@@ -300,6 +300,92 @@ func provenDeadArtifactCleanup() async throws {
     #expect(try journal.read(nonce: nonce) == nil)
 }
 
+@Test("closing a managed window lets the next Open or Preview relaunch instead of demanding recovery", arguments: [ManagedRole.preview, ManagedRole.primary])
+@MainActor
+func closedManagedWindowRelaunches(role: ManagedRole) async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let readOnly = role == .preview
+    let stale = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(
+        nonce: stale,
+        launchKind: .reusableRole,
+        role: role,
+        requestedSessionToken: managedToken,
+        readOnly: readOnly,
+        configurationState: .handshakeObserved,
+        state: .failed,
+        terminal: managedReference,
+        supervisorPID: 98809,
+        childPID: 98813
+    ))
+    try journal.writeConfiguration(.init(nonce: stale, destination: managedToken, readOnly: readOnly))
+    try journal.atomicWrite(
+        ManagedSupervisorHandshake(nonce: stale, supervisorPID: 98809, childPID: 98813, destination: managedToken, readOnly: readOnly),
+        to: journal.handshakeURL(stale)
+    )
+    let automation = FakeManagedAutomation()
+    let controller = TerminalController(
+        automation: automation,
+        journal: journal,
+        supervisorClient: DeadSupervisorClient(),
+        liveness: StubProcessLiveness(defaultDead: true)
+    )
+
+    let outcome = try await controller.ensureManaged(
+        role: role,
+        destination: managedToken,
+        readOnly: readOnly,
+        snapshot: managedSnapshot(readOnly: readOnly),
+        softDeadline: .seconds(1)
+    )
+
+    if case .failed = outcome { Issue.record("a closed \(role) window still demanded manual recovery") }
+    #expect(automation.createCalls == 1)
+    #expect(try journal.read(nonce: stale) == nil)
+    #expect(!FileManager.default.fileExists(atPath: journal.handshakeURL(stale).path))
+}
+
+@Test("a failed candidate whose supervisor is still alive keeps demanding recovery")
+@MainActor
+func failedCandidateWithLiveSupervisorStillNeedsRecovery() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let stale = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(
+        nonce: stale,
+        launchKind: .reusableRole,
+        role: .preview,
+        requestedSessionToken: managedToken,
+        readOnly: true,
+        configurationState: .handshakeObserved,
+        state: .failed,
+        terminal: managedReference,
+        supervisorPID: 98809,
+        childPID: 98813
+    ))
+    let automation = FakeManagedAutomation()
+    let controller = TerminalController(
+        automation: automation,
+        journal: journal,
+        supervisorClient: DeadSupervisorClient(),
+        liveness: StubProcessLiveness()
+    )
+
+    let outcome = try await controller.ensureManaged(
+        role: .preview,
+        destination: managedToken,
+        readOnly: true,
+        snapshot: managedSnapshot(readOnly: true),
+        softDeadline: .seconds(1)
+    )
+
+    guard case .failed = outcome else {
+        Issue.record("a live supervisor must not be relaunched over")
+        return
+    }
+    #expect(automation.createCalls == 0)
+    #expect(try journal.read(nonce: stale) != nil)
+}
+
 @Test("a failed candidate whose supervisor and child are gone is retired without waiting on a detach reply")
 @MainActor
 func deadSupervisorCandidateIsRetiredWithoutDetach() async throws {
