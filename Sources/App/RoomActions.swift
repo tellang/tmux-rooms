@@ -67,8 +67,16 @@ protocol RoomActionHandling: AnyObject {
 final class ProductionRoomActionHandler: RoomActionHandling {
     private let controller: TmuxController
     private let terminal: TerminalController
+    private let idleDeadline: Duration
+
+    init(controller: TmuxController, terminal: TerminalController, idleDeadline: Duration) {
+        self.controller = controller
+        self.terminal = terminal
+        self.idleDeadline = idleDeadline
+    }
 
     init() {
+        idleDeadline = .seconds(30)
         let loader = TmuxSnapshotLoader()
         let socket: URL
         do {
@@ -90,7 +98,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         switch intent {
         case .refresh, .refreshRecovery, .automaticRefresh:
             controller.requestRefresh()
-            await waitUntilIdle()
+            guard await waitUntilIdle() else { return stillRunningResult() }
             if let failure = controller.refreshError { return .failed(.tmux(failure)) }
             let snapshot = controller.snapshot
             return await Self.refreshResult(
@@ -103,7 +111,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
             guard controller.delete(token) else {
                 return .failed(.other("Another room action is still running."))
             }
-            await waitUntilIdle()
+            guard await waitUntilIdle() else { return stillRunningResult() }
             if let failure = controller.refreshError {
                 return .failed(.tmux(failure))
             }
@@ -120,7 +128,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         case let .resolveManaged(nonce, resolution):
             do {
                 controller.requestRefresh()
-                await waitUntilIdle()
+                guard await waitUntilIdle() else { return stillRunningResult() }
                 if let failure = controller.refreshError { return .failed(.tmux(failure)) }
                 let candidates: [ManagedRecoveryCandidate]
                 switch resolution {
@@ -132,7 +140,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
                     _ = try await terminal.cleanUpManagedCandidate(nonce: nonce, snapshot: controller.snapshot)
                 }
                 controller.requestRefresh()
-                await waitUntilIdle()
+                guard await waitUntilIdle() else { return stillRunningResult() }
                 if let failure = controller.refreshError { return .failed(.tmux(failure)) }
                 candidates = try await terminal.managedRecoveryCandidates(snapshot: controller.snapshot)
                 return candidates.isEmpty
@@ -145,7 +153,7 @@ final class ProductionRoomActionHandler: RoomActionHandling {
     }
 
     private func completedAction() async -> AppActionResult {
-        await waitUntilIdle()
+        guard await waitUntilIdle() else { return stillRunningResult() }
         if let failure = controller.refreshError { return .failed(.tmux(failure)) }
         return await map(controller.lastActionResult, snapshot: controller.snapshot)
     }
@@ -154,10 +162,27 @@ final class ProductionRoomActionHandler: RoomActionHandling {
         .failed(.other("Another room action is still running."))
     }
 
-    private func waitUntilIdle() async {
+    /// Waits for the controller to finish its current flight.
+    ///
+    /// Every stage the controller runs is individually bounded — snapshot loads,
+    /// terminal soft deadlines, supervisor round trips — so this only has to
+    /// outlast their sum. It still keeps its own deadline: an unbounded wait
+    /// leaves `RoomsStore.phase` stuck outside `.idle`, and that store drops
+    /// every later action on the floor, so one stalled flight would take the
+    /// whole app down with it. Polling rather than yield-spinning also stops
+    /// the wait from burning a core for its whole duration.
+    private func waitUntilIdle() async -> Bool {
+        let end = ContinuousClock.now.advanced(by: idleDeadline)
         while controller.phase != .idle {
-            await Task.yield()
+            guard ContinuousClock.now < end else { return false }
+            try? await Task.sleep(for: .milliseconds(20))
         }
+        return true
+    }
+
+    /// The controller is still working; its late result reconciles on its own.
+    private func stillRunningResult() -> AppActionResult {
+        .failed(.timeout(underlyingOperationRunning: true))
     }
 
     private func success(snapshot: RoomSnapshot) async -> AppActionResult {
