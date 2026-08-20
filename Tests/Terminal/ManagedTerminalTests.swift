@@ -246,7 +246,12 @@ func falseFailedPartialLaunchCleanup() async throws {
     )
     let supervisor = FakeSupervisorClient()
     let automation = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
-    let controller = TerminalController(automation: automation, journal: journal, supervisorClient: supervisor)
+    let controller = TerminalController(
+        automation: automation,
+        journal: journal,
+        supervisorClient: supervisor,
+        liveness: StubProcessLiveness()
+    )
 
     #expect(try await controller.cleanUpManagedCandidate(nonce: nonce, snapshot: managedSnapshot(readOnly: true)).isEmpty)
     let requests = await supervisor.requests
@@ -293,6 +298,42 @@ func provenDeadArtifactCleanup() async throws {
     #expect(try await controller.cleanUpManagedCandidate(nonce: nonce, snapshot: .noServer).isEmpty)
     #expect(await supervisor.requests.isEmpty)
     #expect(try journal.read(nonce: nonce) == nil)
+}
+
+@Test("a failed candidate whose supervisor and child are gone is retired without waiting on a detach reply")
+@MainActor
+func deadSupervisorCandidateIsRetiredWithoutDetach() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(
+        nonce: nonce,
+        launchKind: .reusableRole,
+        role: .primary,
+        requestedSessionToken: managedToken,
+        readOnly: false,
+        configurationState: .handshakeObserved,
+        state: .failed,
+        terminal: managedReference,
+        supervisorPID: 93204,
+        childPID: 93209
+    ))
+    try journal.writeConfiguration(.init(nonce: nonce, destination: managedToken, readOnly: false))
+    try journal.atomicWrite(
+        ManagedSupervisorHandshake(nonce: nonce, supervisorPID: 93204, childPID: 93209, destination: managedToken, readOnly: false),
+        to: journal.handshakeURL(nonce)
+    )
+    let supervisor = DeadSupervisorClient()
+    let controller = TerminalController(
+        automation: FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)]),
+        journal: journal,
+        supervisorClient: supervisor,
+        liveness: StubProcessLiveness(defaultDead: true)
+    )
+
+    #expect(try await controller.cleanUpManagedCandidate(nonce: nonce, snapshot: managedSnapshot()).isEmpty)
+    #expect(await supervisor.count == 0)
+    #expect(try journal.read(nonce: nonce) == nil)
+    #expect(!FileManager.default.fileExists(atPath: journal.handshakeURL(nonce).path))
 }
 
 private func recoverySnapshot(keys: [(ClientKey, Bool)]) -> RoomSnapshot {
@@ -885,6 +926,23 @@ private actor FixedSupervisorClient: ManagedSupervisorRequesting {
         count += 1
         return .init(requestID: request.id, status: status, childPID: childPID)
     }
+}
+
+/// Stands in for a supervisor process that is no longer running: the request
+/// file is written, nothing ever writes a response, and the poll deadline
+/// expires.
+private actor DeadSupervisorClient: ManagedSupervisorRequesting {
+    private(set) var count = 0
+    func send(_ request: ManagedSupervisorRequest, deadline: Duration) async throws -> ManagedSupervisorResponse {
+        count += 1
+        throw ManagedTerminalError.automation(.timeout)
+    }
+}
+
+private struct StubProcessLiveness: ProcessLivenessProbing {
+    let defaultDead: Bool
+    init(defaultDead: Bool = false) { self.defaultDead = defaultDead }
+    func isDefinitelyDead(_ pid: Int32) -> Bool { defaultDead }
 }
 
 private actor SuspendedSupervisorClient: ManagedSupervisorRequesting {

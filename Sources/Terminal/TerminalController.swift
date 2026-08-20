@@ -17,13 +17,15 @@ public final class TerminalController: TerminalControlling {
     private let journal: ManagedClientJournal
     private let tmuxExecutablePath: String
     private let supervisorClient: any ManagedSupervisorRequesting
+    private let liveness: any ProcessLivenessProbing
     private let lateFailureHandler: @MainActor @Sendable (String) -> Void
     private var launches: [String: Task<Result<ManagedTerminalReference, SmokeAutomationError>, Never>] = [:]
     private var lateCompletions: [String: Task<Void, Never>] = [:]
 
-    public init(automation: any ManagedITermAutomating = ITermManagedAutomation(), journal: ManagedClientJournal = .init(), tmuxExecutablePath: String = "/opt/homebrew/bin/tmux", supervisorClient: (any ManagedSupervisorRequesting)? = nil, lateFailureHandler: (@MainActor @Sendable (String) -> Void)? = nil) {
+    public init(automation: any ManagedITermAutomating = ITermManagedAutomation(), journal: ManagedClientJournal = .init(), tmuxExecutablePath: String = "/opt/homebrew/bin/tmux", supervisorClient: (any ManagedSupervisorRequesting)? = nil, liveness: any ProcessLivenessProbing = POSIXProcessLiveness(), lateFailureHandler: (@MainActor @Sendable (String) -> Void)? = nil) {
         self.automation = automation; self.journal = journal; self.tmuxExecutablePath = tmuxExecutablePath
         self.supervisorClient = supervisorClient ?? ManagedSupervisorClient(journal: journal)
+        self.liveness = liveness
         self.lateFailureHandler = lateFailureHandler ?? { message in Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal").error("\(message, privacy: .public)") }
     }
 
@@ -232,8 +234,24 @@ public final class TerminalController: TerminalControlling {
             throw ManagedTerminalError.staleOwnership
         }
         let handshake = try journal.readHandshake(nonce: nonce)
+        // A record keeps naming its supervisor, child, and iTerm session long
+        // after all three are gone — the tmux server restarts, the terminal
+        // quits, the machine reboots — and reconcile() re-reads those same PIDs
+        // out of the handshake on every pass. Ownership therefore has to be
+        // proven by live processes and a live client, never by the mere
+        // presence of those fields: otherwise cleanup mails a detach request to
+        // a supervisor that cannot answer, times out, leaves the record in
+        // place, and the recovery panel has no exit at all.
+        let supervisorGone = record.supervisorPID.map { liveness.isDefinitelyDead($0) } ?? true
+        let childGone = record.childPID.map { liveness.isDefinitelyDead($0) } ?? true
+        let handshakeGone = handshake.map {
+            liveness.isDefinitelyDead($0.supervisorPID) && liveness.isDefinitelyDead($0.childPID)
+        } ?? true
+        let clientAttached = record.liveClientKey.map { key in
+            snapshot.rooms.contains { $0.clients.contains { $0.key == key } }
+        } ?? false
         let provenDead = (record.state == .provisional || record.state == .failed)
-            && record.terminal == nil && record.supervisorPID == nil && record.childPID == nil && handshake == nil
+            && supervisorGone && childGone && handshakeGone && !clientAttached
             && launches[nonce] == nil && lateCompletions[nonce] == nil
         if provenDead {
             try journal.retire(record)
