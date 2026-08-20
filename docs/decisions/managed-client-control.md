@@ -85,3 +85,24 @@ xcodebuild -project TmuxRooms.xcodeproj \
   -derivedDataPath DerivedDataT5 \
   test -only-testing:TmuxRoomsTests/ManagedMutationRaceTests
 ```
+
+## Supported tmux releases (2026-08-20)
+
+The parser first accepted exactly `3.6b`. That turned an ordinary Homebrew
+upgrade into a total outage: the running 3.6b server kept the app working only
+because its already-deleted binary stayed mapped, and the next server start
+would have made every room unreadable with `unsupportedVersion("3.7c")`.
+
+`TmuxParser.minimumSupportedVersion` is now a floor of `3.6b`, compared through
+`TmuxVersion`, so later releases are accepted and pre-3.6b ones stay rejected.
+
+3.7c was re-verified against the exact snapshot command on a private short
+socket before the floor was introduced. The `#{n:name}` length framing, the five
+boundary fields, and the ten client fields are byte-identical in shape to 3.6b;
+`client_readonly` and `client_control_mode` still report correctly for a real
+read-only PTY client. 3.7c adds an `ignore-size` client flag, which the parser
+already tolerates because it validates `read-only` and `control-mode` against
+their boolean fields and otherwise treats flags as an open set.
+
+The T5 verdict above is unchanged: it describes a format-surface gap that this
+floor does not revisit.

@@ -49,10 +49,27 @@ func limits() {
     #expect(throws: TmuxFailure.self) { try parseVerified(record("B", [String(repeating: "x", count: TmuxParser.fieldLimit + 1), "a", "1", "1", "3.6b"])) }
 }
 
-@Test("boundary records must match and version is allowlisted")
+@Test("boundary records must match and the version floor is enforced")
 func boundaryValidation() {
     #expect(throws: TmuxFailure.self) { try parseVerified(record("B", boundary) + record("E", ["1", "/tmp/t.sock", "124", "1700000000", "3.6b"])) }
     #expect(throws: TmuxFailure.self) { try parseVerified(record("B", ["1", "/tmp/t.sock", "123", "1700000000", "3.5a"]) + record("E", ["1", "/tmp/t.sock", "123", "1700000000", "3.5a"])) }
+}
+
+private func versionedData(_ version: String) -> Data {
+    let bounds = ["1", "/tmp/t.sock", "123", "1700000000", version]
+    return record("B", bounds) + record("S", session) + record("C", client) + record("P", pane) + record("E", bounds)
+}
+
+@Test("a release at or above the verified floor parses; older or unreadable ones stay rejected", arguments: [
+    ("3.6b", true), ("3.7c", true), ("3.10", true), ("4.0", true), ("next-3.8", true),
+    ("3.6", false), ("3.5a", false), ("2.9", false), ("3", false), ("", false), ("3.x", false), ("3.6B", false),
+])
+func versionFloor(version: String, supported: Bool) {
+    if supported {
+        #expect(throws: Never.self) { try parseVerified(versionedData(version)) }
+    } else {
+        #expect(throws: TmuxFailure.self) { try parseVerified(versionedData(version)) }
+    }
 }
 
 @Test(arguments: ["$00", "$-1", "0", "$", "$a"])

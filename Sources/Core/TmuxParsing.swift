@@ -1,9 +1,39 @@
 import Foundation
 
+/// A tmux release as reported by `#{version}`.
+///
+/// tmux spells releases `<major>.<minor>` with an optional lowercase revision
+/// letter — `3.6`, `3.6b`, `3.7c` — and prefixes development builds `next-`.
+/// Ordering a release against a floor lets a routine tmux upgrade keep working
+/// instead of blinding the app until someone edits an exact-match constant.
+struct TmuxVersion: Comparable {
+    let major: Int, minor: Int, revision: UInt8
+
+    init(major: Int, minor: Int, revision: UInt8) { self.major=major; self.minor=minor; self.revision=revision }
+
+    init?(_ text: String) {
+        var body = Substring(text)
+        if body.hasPrefix("next-") { body = body.dropFirst(5) }
+        var revision: UInt8 = 0
+        if let last = body.last, last.isLetter, last.isLowercase, let ascii = last.asciiValue, ascii >= 97 {
+            revision = ascii - 96
+            body = body.dropLast()
+        }
+        let parts = body.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2, let major = Int(parts[0]), let minor = Int(parts[1]), major >= 0, minor >= 0 else { return nil }
+        self.init(major: major, minor: minor, revision: revision)
+    }
+
+    static func < (a: Self, b: Self) -> Bool { (a.major, a.minor, a.revision) < (b.major, b.minor, b.revision) }
+}
+
 enum TmuxParser {
     static let fieldLimit = 1_048_576
     static let stdoutLimit = 16_777_216
     static let recordLimit = 100_000
+    /// The oldest release whose format surface this parser has been verified
+    /// against. See `docs/decisions/managed-client-control.md`.
+    static let minimumSupportedVersion = TmuxVersion(major: 3, minor: 6, revision: 2)
 
     static func parse(_ data: Data) throws -> RawTmuxSnapshot {
         guard data.count <= stdoutLimit else { throw TmuxFailure.outputLimitExceeded }
@@ -14,7 +44,7 @@ enum TmuxParser {
         let begin=records[0].1,end=records[records.count-1].1
         guard begin.count == 5, begin == end else { throw bad("boundary mismatch") }
         guard begin[0] == "1" else { throw bad("schema") }
-        guard begin[4] == "3.6b" else { throw TmuxFailure.unsupportedVersion(begin[4]) }
+        guard let version = TmuxVersion(begin[4]), version >= minimumSupportedVersion else { throw TmuxFailure.unsupportedVersion(begin[4]) }
         guard !begin[1].isEmpty,let pid=int32(begin[2]),let started=int64(begin[3]) else { throw bad("boundary values") }
         let boundary=RawTmuxBoundary(socketPath:begin[1],serverPID:pid,startedAtUnixSeconds:started)
         var sessions:[String:RawTmuxSession]=[:],clients:[RawTmuxClient]=[],panes:[RawTmuxPane]=[]
