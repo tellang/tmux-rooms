@@ -64,9 +64,20 @@ public final class TmuxController {
         startRefresh()
     }
 
-    public func focusableClientKeys() async -> Set<ClientKey> {
-        guard let terminal else { return [] }
-        return (try? await terminal.focusableClientKeys(snapshot: snapshot)) ?? []
+    /// Which clients can be focused, or `nil` when the lookup could not answer.
+    ///
+    /// A failed lookup is not an empty answer. Reporting `[]` would tell the app
+    /// that nothing on the machine can be focused, and the room list would drop
+    /// every client it had already verified to "terminal mapping has not been
+    /// verified yet" because one Apple Event went wrong.
+    public func focusableClientKeys() async -> Set<ClientKey>? {
+        guard let terminal else { return nil }
+        do {
+            return try await terminal.focusableClientKeys(snapshot: snapshot)
+        } catch {
+            RoomsLog.swallowed.error("focus.lookup_failed trace=\(ActionTrace.currentID, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 
     @discardableResult

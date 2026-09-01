@@ -135,7 +135,8 @@ public struct ITermAutomationSmoke: Sendable {
     }
 
     private static func decodeEnumeration(_ value: AppleScriptValue) -> (version: String, references: [ITermSessionReference])? {
-        guard case let .list(items) = value, items.count == 2, case let .string(version) = items[0], case let .list(rows) = items[1] else { return nil }
+        guard case let .list(items) = value, items.count == 3, case let .string(version) = items[0],
+              case let .list(rows) = items[1], case .integer(0) = items[2] else { return nil }
         let references = rows.compactMap(decodeReference)
         guard references.count == rows.count else { return nil }
         return (version, references)

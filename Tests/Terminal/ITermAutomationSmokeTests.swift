@@ -25,7 +25,7 @@ private func descriptor(_ reference: ITermSessionReference) -> AppleScriptValue 
 }
 
 private func enumeration(_ references: [ITermSessionReference]) -> AppleScriptExecution {
-    .success(.list([.string("3.5.14"), .list(references.map(descriptor))]))
+    .success(.list([.string("3.5.14"), .list(references.map(descriptor)), .integer(0)]))
 }
 
 private func focus(_ reference: ITermSessionReference, frontmost: Bool = true) -> AppleScriptExecution {

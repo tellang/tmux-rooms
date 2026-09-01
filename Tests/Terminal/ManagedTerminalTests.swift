@@ -22,12 +22,19 @@ private final class FakeManagedAutomation: ManagedITermAutomating {
     private(set) var createdNonces: [String] = []
     var createProbe: (() -> Void)?
     private(set) var titleUpdates: [(ManagedTerminalReference, String, String)] = []
+    private(set) var titleConfirmations: [(ManagedTerminalReference, String, String, String)] = []
+    var titleConfirmationResults: [Result<Bool, SmokeAutomationError>] = []
     var titleResults: [Result<ManagedTerminalReference, SmokeAutomationError>] = []
     private var continuation: CheckedContinuation<Result<ManagedTerminalReference, SmokeAutomationError>, Never>?
 
     init(create: Create = .immediate(.success(managedReference)), evidence: [ManagedSessionEvidence] = []) { self.create = create; self.evidence = evidence }
     func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError> { .success(evidence.map(\.terminal)) }
-    func enumerateManagedSessions() async -> Result<[ManagedSessionEvidence], SmokeAutomationError> { .success(evidence) }
+    func enumerateSessionTTYs() async -> Result<[String], SmokeAutomationError> { .success(evidence.map(\.terminal.tty)) }
+    private(set) var enumerateManagedCalls = 0
+    func enumerateManagedSessions() async -> Result<[ManagedSessionEvidence], SmokeAutomationError> {
+        enumerateManagedCalls += 1
+        return .success(evidence)
+    }
     func createManagedSession(nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
         createCalls += 1
         createdNonces.append(nonce)
@@ -37,9 +44,16 @@ private final class FakeManagedAutomation: ManagedITermAutomating {
         case .suspended: return await withCheckedContinuation { continuation = $0 }
         }
     }
-    func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
+    func requestManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<String, SmokeAutomationError> {
         titleUpdates.append((reference, nonce, title))
-        return titleResults.isEmpty ? .success(reference) : titleResults.removeFirst()
+        switch titleResults.isEmpty ? .success(reference) : titleResults.removeFirst() {
+        case .success: return .success("TitleRequest\(titleUpdates.count)")
+        case let .failure(error): return .failure(error)
+        }
+    }
+    func confirmManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String, requestID: String) async -> Result<Bool, SmokeAutomationError> {
+        titleConfirmations.append((reference, nonce, title, requestID))
+        return titleConfirmationResults.isEmpty ? .success(true) : titleConfirmationResults.removeFirst()
     }
     func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> { .success(reference) }
     func focusExactSession(_ reference: ManagedTerminalReference) async -> Result<ManagedTerminalReference, SmokeAutomationError> { .success(reference) }
@@ -222,6 +236,93 @@ func exactManagedCleanup() async throws {
     #expect(requests[0].action == .detach)
     #expect(try journal.read(nonce: nonce) == nil)
     #expect(!FileManager.default.fileExists(atPath: journal.handshakeURL(nonce).path))
+}
+
+@Test("the Preview target is the room its live managed record names")
+@MainActor
+func managedPreviewTargetNeedsALiveClient() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    var record = ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .preview, requestedSessionToken: managedToken, readOnly: true, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey)
+    try journal.write(record)
+    let controller = TerminalController(automation: FakeManagedAutomation(evidence: []), journal: journal)
+
+    #expect(try controller.managedPreviewTarget(snapshot: managedSnapshot(readOnly: true)) == managedToken)
+
+    let closedWindow = RoomSnapshot(server: managedServer, rooms: [
+        .init(token: managedToken, name: "room", lastActivityAtUnixSeconds: 1, panes: [], clients: [])
+    ])
+    #expect(try controller.managedPreviewTarget(snapshot: closedWindow) == nil)
+
+    record.state = .launching
+    record.updatedAt = Date()
+    try journal.write(record)
+    #expect(try controller.managedPreviewTarget(snapshot: managedSnapshot(readOnly: true)) == nil)
+}
+
+@Test("a Primary record never reads as an active Preview")
+@MainActor
+func managedPreviewTargetIgnoresPrimary() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey))
+    let controller = TerminalController(automation: FakeManagedAutomation(evidence: []), journal: journal)
+
+    #expect(try controller.managedPreviewTarget(snapshot: managedSnapshot()) == nil)
+}
+
+@Test("focus and focusability read ownership from the journal instead of enumerating again")
+@MainActor
+func focusPathsDoNotReEnumerate() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let nonce = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(nonce: nonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey))
+    let automation = FakeManagedAutomation(evidence: [.init(terminal: managedReference, nonce: nonce)])
+    let controller = TerminalController(automation: automation, journal: journal)
+    let snapshot = managedSnapshot()
+
+    #expect(try await controller.focusableClientKeys(snapshot: snapshot).contains(managedKey))
+    #expect(automation.enumerateManagedCalls == 0)
+
+    #expect(try await controller.focus(clientKey: managedKey, snapshot: snapshot) == .managed(try #require(try journal.read(nonce: nonce))))
+    #expect(automation.enumerateManagedCalls == 0)
+
+    // The pass that establishes ownership still enumerates. Only the two calls
+    // that used to repeat it stopped.
+    _ = try await controller.reconcile(snapshot: snapshot)
+    #expect(automation.enumerateManagedCalls == 1)
+}
+
+@Test("Close Preview detaches the Preview record and leaves Primary alone")
+@MainActor
+func closeManagedPreviewDetachesOnlyPreview() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let previewNonce = ManagedNonce.generate()
+    let primaryNonce = ManagedNonce.generate()
+    try journal.write(ManagedClientRecord(nonce: previewNonce, launchKind: .reusableRole, role: .preview, requestedSessionToken: managedToken, readOnly: true, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 10, childPID: 11, liveClientKey: managedKey))
+    try journal.write(ManagedClientRecord(nonce: primaryNonce, launchKind: .reusableRole, role: .primary, requestedSessionToken: managedToken, readOnly: false, configurationState: .handshakeObserved, state: .complete, terminal: managedReference, supervisorPID: 20, childPID: 21, liveClientKey: managedKey))
+    try journal.atomicWrite(ManagedSupervisorHandshake(nonce: previewNonce, supervisorPID: 10, childPID: 11, destination: managedToken, readOnly: true), to: journal.handshakeURL(previewNonce))
+    let supervisor = FakeSupervisorClient()
+    let controller = TerminalController(automation: FakeManagedAutomation(evidence: []), journal: journal, supervisorClient: supervisor)
+
+    #expect(try await controller.closeManagedPreview(snapshot: managedSnapshot(readOnly: true)))
+    let requests = await supervisor.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].nonce == previewNonce)
+    #expect(requests[0].action == .detach)
+    #expect(try journal.read(nonce: previewNonce) == nil)
+    #expect(try journal.read(nonce: primaryNonce)?.state == .complete)
+}
+
+@Test("Close Preview with no Preview window is a no-op, not a failure")
+@MainActor
+func closeManagedPreviewWithoutPreviewIsNoOp() async throws {
+    let (journal, root) = try temporaryJournal(); defer { try? FileManager.default.removeItem(at: root) }
+    let supervisor = FakeSupervisorClient()
+    let controller = TerminalController(automation: FakeManagedAutomation(evidence: []), journal: journal, supervisorClient: supervisor)
+
+    #expect(try await controller.closeManagedPreview(snapshot: managedSnapshot()) == false)
+    #expect(await supervisor.count == 0)
 }
 
 @Test("a false-failed partial launch with exact live evidence remains detachable")
@@ -465,11 +566,22 @@ func previewLaunchCarriesRoomTitle() async throws {
     #expect(configuration.pendingPreviewTitle == "READ ONLY · ops \\\"blue\\\" \\\\ desk")
 
     fake.evidence = [.init(terminal: managedReference, nonce: configuration.nonce)]
-    let reconciled = try await TerminalController(automation: fake, journal: journal)
-        .reconcile(snapshot: snapshot)
+    let controller = TerminalController(automation: fake, journal: journal)
+    let reconciled = try await controller.reconcile(snapshot: snapshot)
     #expect(reconciled.first?.state == .complete)
     #expect(fake.titleUpdates.first?.2 == "READ ONLY · ops \\\"blue\\\" \\\\ desk")
+    // The pass requests the title and stops there. Waiting for iTerm to apply
+    // it is what used to freeze the app, so the marker only clears once a
+    // later pass confirms it.
+    #expect(try journal.read(nonce: configuration.nonce)?.pendingPreviewTitle != nil)
+    #expect(try journal.read(nonce: configuration.nonce)?.pendingTitleRequestID != nil)
+    #expect(fake.titleConfirmations.isEmpty)
+
+    _ = try await controller.reconcile(snapshot: snapshot)
+    #expect(fake.titleUpdates.count == 1)
+    #expect(fake.titleConfirmations.count == 1)
     #expect(try journal.read(nonce: configuration.nonce)?.pendingPreviewTitle == nil)
+    #expect(try journal.read(nonce: configuration.nonce)?.pendingTitleRequestID == nil)
 }
 
 @Test("Preview title normalizes unsafe multiline room names and stays bounded")
@@ -590,6 +702,9 @@ func previewSwitchUpdatesExactTitle() async throws {
     #expect(fake.titleUpdates.first?.0 == managedReference)
     #expect(fake.titleUpdates.first?.1 == nonce)
     #expect(fake.titleUpdates.first?.2 == "READ ONLY · new \"room\" \\ blue line")
+    #expect(try journal.read(nonce: nonce)?.pendingTitleRequestID != nil)
+    _ = try await TerminalController(automation: fake, journal: journal, supervisorClient: supervisor)
+        .reconcile(snapshot: afterSwitch)
     #expect(try journal.read(nonce: nonce)?.pendingPreviewTitle == nil)
     #expect(await supervisor.count == 1)
 }
@@ -634,6 +749,7 @@ func previewTitleRetrySurvivesControllerRecreation() async throws {
     #expect(retryAutomation.titleUpdates.first?.0 == managedReference)
     #expect(retryAutomation.titleUpdates.first?.1 == nonce)
     #expect(retryAutomation.titleUpdates.first?.2 == "READ ONLY · retry room")
+    _ = try await recreated.reconcile(snapshot: afterSwitch)
     #expect(try journal.read(nonce: nonce)?.pendingPreviewTitle == nil)
     #expect(await supervisor.count == 1)
 }
@@ -979,11 +1095,37 @@ func managedScriptsCompile() throws {
 func managedAppleScriptFake() async throws {
     let nonce = ManagedNonce.generate()
     let value: AppleScriptValue = .list([.integer(8), .integer(1), .string("GUID-1"), .string("/dev/ttys099"), .string(nonce)])
-    let runner = ManagedScriptRunner([.success(value), .success(.list([value]))])
+    let runner = ManagedScriptRunner([.success(value), .success(.list([.list([value]), .integer(0)]))])
     let helper = try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/Applications/Tmux Rooms.app"))
     let automation = ITermManagedAutomation(runner: runner, helperPath: helper)
     #expect(await automation.createManagedSession(nonce: nonce) == .success(managedReference))
     #expect(await automation.enumerateManagedSessions() == .success([.init(terminal: managedReference, nonce: nonce)]))
+}
+
+@Test("a skipped window retries once and never passes off a partial enumeration")
+@MainActor
+func partialEnumerationRetriesThenFailsClosed() async throws {
+    let nonce = ManagedNonce.generate()
+    let row: AppleScriptValue = .list([.integer(8), .integer(1), .string("GUID-1"), .string("/dev/ttys099"), .string(nonce)])
+    let helper = try ITermBundledHelperPath.resolve(bundleURL: URL(fileURLWithPath: "/Applications/Tmux Rooms.app"))
+
+    let recovers = ManagedScriptRunner([
+        .success(.list([.list([]), .integer(1)])),
+        .success(.list([.list([row]), .integer(0)]))
+    ])
+    #expect(
+        await ITermManagedAutomation(runner: recovers, helperPath: helper).enumerateManagedSessions()
+            == .success([.init(terminal: managedReference, nonce: nonce)])
+    )
+
+    let staysDirty = ManagedScriptRunner([
+        .success(.list([.list([]), .integer(2)])),
+        .success(.list([.list([]), .integer(1)]))
+    ])
+    #expect(
+        await ITermManagedAutomation(runner: staysDirty, helperPath: helper).enumerateManagedSessions()
+            == .failure(.staleTarget)
+    )
 }
 
 @MainActor

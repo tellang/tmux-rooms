@@ -91,6 +91,7 @@ struct RoomsRootView: View {
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(QuietIconButtonStyle())
+            .keyboardFocusable()
             .disabled(store.phase != .idle)
             .keyboardShortcut("r", modifiers: .command)
             .accessibilityLabel("Refresh tmux rooms")
@@ -133,7 +134,8 @@ struct RoomsRootView: View {
                 } label: {
                     Label("Quit", systemImage: "power")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainPressButtonStyle())
+                .keyboardFocusable()
                 .accessibilityIdentifier("quit")
             }
             .font(.custom("Avenir Next Medium", size: 10))
@@ -197,6 +199,7 @@ private struct FixtureActionGate: View {
                 .font(.custom("Avenir Next Demi Bold", size: 12))
             Button("Complete fixture action") { store.completeFixtureAction() }
                 .buttonStyle(PrimaryActionButtonStyle())
+                .keyboardFocusable()
                 .accessibilityIdentifier("fixture.action.complete")
         }
         .padding(16)
@@ -254,6 +257,9 @@ private struct RoomRow: View {
                     .accessibilityLabel(title)
                     .accessibilityIdentifier("room.\(roomID)")
                 Spacer(minLength: 6)
+                if room.interactiveClients.count == 1, let client = room.interactiveClients.first {
+                    focusIndicator(for: client)
+                }
                 Text(statusText)
                     .font(.custom("SF Mono Medium", size: 10))
                     .foregroundStyle(attached ? Palette.mint : Palette.muted)
@@ -284,12 +290,10 @@ private struct RoomRow: View {
                 .foregroundStyle(Palette.muted)
             }
 
-            if room.interactiveClients.count == 1, let client = room.interactiveClients.first {
-                clientStatus(client)
-            }
-
-            if !room.readOnlyClients.isEmpty {
-                Label("READ ONLY Preview active", systemImage: "eye")
+            // Our own Preview says so on its button. A read-only client we do
+            // not own has nowhere else to appear, so it keeps the line.
+            if !room.readOnlyClients.isEmpty, !store.isPreviewing(room) {
+                Label("READ ONLY client attached", systemImage: "eye")
                     .font(.custom("Avenir Next Demi Bold", size: 10))
                     .foregroundStyle(Palette.amber)
                     .accessibilityIdentifier("room.\(roomID).preview-status")
@@ -301,15 +305,10 @@ private struct RoomRow: View {
                     .accessibilityLabel("Open existing room \(room.name)")
                     .accessibilityHint(openHint)
                     .accessibilityIdentifier("room.\(roomID).open")
-                    .focusable()
+                    .keyboardFocusable()
                     .fixtureDefaultAction(store.isFixture)
                     .disabled(store.phase != .idle)
-                Button("Preview") { store.preview(room) }
-                    .buttonStyle(SecondaryActionButtonStyle())
-                    .accessibilityLabel("Preview \(room.name) read only")
-                    .accessibilityIdentifier("room.\(roomID).preview")
-                    .focusable()
-                    .disabled(store.phase != .idle)
+                PreviewControl(store: store, room: room, roomID: roomID)
                 Spacer()
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) { showsMore.toggle() }
@@ -318,7 +317,7 @@ private struct RoomRow: View {
                 }
                 .buttonStyle(QuietButtonStyle())
                 .accessibilityIdentifier("room.\(roomID).more")
-                .focusable()
+                .keyboardFocusable()
                 .disabled(store.phase != .idle)
             }
 
@@ -331,13 +330,13 @@ private struct RoomRow: View {
                         Button("Duplicate Window") { store.duplicate(room) }
                             .buttonStyle(SecondaryActionButtonStyle())
                             .accessibilityIdentifier("room.\(roomID).duplicate")
-                            .focusable()
+                            .keyboardFocusable()
                             .disabled(store.phase != .idle)
                         Button("Delete…", role: .destructive) { store.requestDelete(room) }
                             .buttonStyle(DangerButtonStyle())
                             .accessibilityLabel("Delete room \(room.name)")
                             .accessibilityIdentifier("room.\(roomID).delete")
-                            .focusable()
+                            .keyboardFocusable()
                             .disabled(store.phase != .idle)
                     }
                 }
@@ -355,15 +354,26 @@ private struct RoomRow: View {
     }
 
     @ViewBuilder
-    private func clientStatus(_ client: SessionRoom.Client) -> some View {
-        switch store.focusability(for: client) {
-        case .focusable:
-            Label("One client · exact iTerm target ready", systemImage: "scope")
-                .foregroundStyle(Palette.mint)
-        case .unavailable(let reason):
-            Label("One client · cannot focus: \(reason)", systemImage: "exclamationmark.triangle")
-                .foregroundStyle(Palette.amber)
+    /// Whether the one attached client can be focused, said in a dot.
+    ///
+    /// This used to be a sentence of its own above the actions. The sentence
+    /// only ever reported one bit, and it cost a line on every card that had a
+    /// client. The bit now rides beside the room's status, and the sentence
+    /// survives as the dot's accessibility label, where the detail is still
+    /// worth having.
+    private func focusIndicator(for client: SessionRoom.Client) -> some View {
+        let focusability = store.focusability(for: client)
+        let ready = focusability.isFocusable
+        let detail: String
+        switch focusability {
+        case .focusable: detail = "Exact iTerm target ready"
+        case let .unavailable(reason): detail = "Cannot focus: \(reason)"
         }
+        return Circle()
+            .fill(ready ? Palette.mint : Palette.amber)
+            .frame(width: 6, height: 6)
+            .accessibilityLabel(detail)
+            .accessibilityIdentifier("room.\(roomID).focus-indicator")
     }
 
     private var statusText: String {
@@ -377,6 +387,99 @@ private struct RoomRow: View {
         case 1: "Focus the exact existing client when available."
         default: "Choose the exact client to focus. No client is selected automatically."
         }
+    }
+}
+
+/// Takes keyboard focus without taking the system's blue ring with it.
+///
+/// Apple draws focus on macOS as a ring around the control and allows that
+/// halo to be customised. The ring itself is drawn by each button style, in
+/// the colour that button already uses, so a card full of differently shaped
+/// buttons does not end up wearing one shared outline in an accent colour that
+/// belongs to nothing else on it.
+private extension View {
+    func keyboardFocusable() -> some View {
+        focusable().focusEffectDisabled()
+    }
+}
+
+/// The focus halo, drawn just outside the control's own shape.
+private struct FocusHalo<S: InsettableShape>: ViewModifier {
+    @Environment(\.isFocused) private var focused
+    let tint: Color
+    let pressed: Bool
+    let shape: S
+
+    func body(content: Content) -> some View {
+        // A press reads as the control going down and dark, so the halo stays
+        // out of the way until the finger lifts.
+        let lit = focused && !pressed
+        content
+            .overlay {
+                shape
+                    .strokeBorder(tint.opacity(lit ? 0.9 : 0), lineWidth: 1.5)
+            }
+            .overlay {
+                shape
+                    .strokeBorder(tint.opacity(lit ? 0.5 : 0), lineWidth: 3)
+                    .blur(radius: 3)
+                    .padding(-2)
+            }
+            .animation(.easeOut(duration: 0.12), value: lit)
+    }
+}
+
+private extension View {
+    func focusHalo(_ tint: Color, pressed: Bool, in shape: some InsettableShape) -> some View {
+        modifier(FocusHalo(tint: tint, pressed: pressed, shape: shape))
+    }
+}
+
+/// One button for the whole Preview state.
+///
+/// The room used to carry a separate READ ONLY line above the actions, which
+/// pushed the buttons down the moment a Preview opened and said nothing about
+/// how to end it. The state now lives on the button that caused it: it reads
+/// READ ONLY while a Preview is up, and turns into Close Preview under the
+/// pointer, so the way out is where the way in was.
+private struct PreviewControl: View {
+    @ObservedObject var store: RoomsStore
+    let room: SessionRoom
+    let roomID: String
+    @State private var hovering = false
+
+    var body: some View {
+        if store.isPreviewing(room) {
+            Button {
+                store.closePreview(room)
+            } label: {
+                // Both labels occupy the same width, so the row does not shift
+                // as the pointer crosses the button.
+                ZStack {
+                    label("Close Preview", icon: "xmark").opacity(hovering ? 1 : 0)
+                    label("READ ONLY", icon: "eye").opacity(hovering ? 0 : 1)
+                }
+            }
+            .buttonStyle(PreviewActiveButtonStyle(closing: hovering))
+            .onHover { hovering = $0 }
+            .accessibilityLabel("Close preview of \(room.name)")
+            .accessibilityIdentifier("room.\(roomID).close-preview")
+            .keyboardFocusable()
+            .disabled(store.phase != .idle)
+        } else {
+            Button("Preview") { store.preview(room) }
+                .buttonStyle(SecondaryActionButtonStyle())
+                .accessibilityLabel("Preview \(room.name) read only")
+                .accessibilityIdentifier("room.\(roomID).preview")
+                .keyboardFocusable()
+                .disabled(store.phase != .idle)
+        }
+    }
+
+    private func label(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon)
+            .labelStyle(.titleAndIcon)
+            .fixedSize()
     }
 }
 
@@ -416,6 +519,7 @@ private struct ClientChooserSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(ClientChoiceButtonStyle())
+                .keyboardFocusable()
                 .disabled(!state.isFocusable)
                 .accessibilityLabel("Client \(client.clientName), \(client.tty ?? "TTY unavailable"), \(state.isFocusable ? "focusable" : "unavailable")")
                 .accessibilityIdentifier("client.\(client.clientName).select")
@@ -426,6 +530,7 @@ private struct ClientChooserSheet: View {
                 Button("Cancel") { store.cancelChooser() }
                     .keyboardShortcut(.cancelAction)
                     .buttonStyle(SecondaryActionButtonStyle())
+                    .keyboardFocusable()
                     .accessibilityIdentifier("client-chooser.cancel")
             }
         }
@@ -459,11 +564,13 @@ private struct DeleteConfirmationSheet: View {
                 Button("Cancel") { store.cancelDelete() }
                     .keyboardShortcut(.cancelAction)
                     .buttonStyle(SecondaryActionButtonStyle())
+                    .keyboardFocusable()
                     .accessibilityIdentifier("delete-confirmation.cancel")
                 Spacer()
                 Button("Delete Session", role: .destructive) { store.confirmDelete() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(DangerButtonStyle())
+                    .keyboardFocusable()
                     .accessibilityIdentifier("delete-confirmation.confirm")
             }
         }
@@ -521,13 +628,16 @@ private struct IssueBanner: View {
                         HStack(spacing: 7) {
                             if isPromotable(candidate) && !candidate.readOnly {
                                 Button("Use as Primary") { store.resolve(candidateNonce: candidate.nonce, as: .choosePrimary) }
+                                    .keyboardFocusable()
                                     .accessibilityIdentifier("recovery.\(candidate.nonce).choose-primary")
                             }
                             if isPromotable(candidate) && candidate.readOnly {
                                 Button("Use as Preview") { store.resolve(candidateNonce: candidate.nonce, as: .choosePreview) }
+                                    .keyboardFocusable()
                                     .accessibilityIdentifier("recovery.\(candidate.nonce).choose-preview")
                             }
                             Button("Clean Up This Candidate") { store.resolve(candidateNonce: candidate.nonce, as: .cleanUp) }
+                                .keyboardFocusable()
                                 .accessibilityIdentifier("recovery.\(candidate.nonce).clean-up")
                         }
                     }
@@ -541,6 +651,7 @@ private struct IssueBanner: View {
             case .enabled(let intent):
                 Button(issue.kind == .staleTarget ? "Refresh" : "Retry") { store.retry(intent) }
                     .buttonStyle(QuietButtonStyle())
+                    .keyboardFocusable()
                     .accessibilityIdentifier(issue.kind == .staleTarget ? "issue.refresh" : "issue.retry")
             case .blockedWhileRunning:
                 Button("Retry") {}
@@ -614,13 +725,53 @@ private extension SessionRoom {
     }
 }
 
+private extension View {
+    /// The one press response every button on the card uses.
+    ///
+    /// Apple asks for a press state on any custom button, since a button with
+    /// none reads as unresponsive, but leaves the shape of that state to the
+    /// app. Every button here answers the same way: it dips under the press,
+    /// darkens by the same amount whatever its fill, carries a shadow along the
+    /// inside of its top edge, and springs back on release. One response across
+    /// seven differently shaped buttons is what makes them feel like one set.
+    func pressedResponse(_ pressed: Bool, in shape: some InsettableShape) -> some View {
+        overlay {
+            shape.fill(Color.black.opacity(pressed ? 0.28 : 0))
+        }
+        .overlay {
+            shape
+                .stroke(Color.black.opacity(pressed ? 0.7 : 0), lineWidth: 4)
+                .blur(radius: 3)
+                .offset(y: 2)
+                .mask(shape.fill(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .center)))
+        }
+        .scaleEffect(pressed ? 0.95 : 1, anchor: .center)
+        .offset(y: pressed ? 0.75 : 0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.45), value: pressed)
+    }
+}
+
+/// For a button with no box of its own. It moves and dims with the same spring
+/// as the rest, because a button that never answers a press reads as dead.
+private struct PlainPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.55 : 1)
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .offset(y: configuration.isPressed ? 0.75 : 0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.45), value: configuration.isPressed)
+    }
+}
+
 private struct PrimaryActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.custom("Avenir Next Demi Bold", size: 11))
             .padding(.horizontal, 14).padding(.vertical, 7)
             .foregroundStyle(Color.black.opacity(0.82))
-            .background(Palette.mint.opacity(configuration.isPressed ? 0.72 : 1), in: Capsule())
+            .background(Palette.mint, in: Capsule())
+            .pressedResponse(configuration.isPressed, in: Capsule())
+            .focusHalo(Palette.mint, pressed: configuration.isPressed, in: Capsule())
     }
 }
 
@@ -630,8 +781,28 @@ private struct SecondaryActionButtonStyle: ButtonStyle {
             .font(.custom("Avenir Next Demi Bold", size: 11))
             .padding(.horizontal, 12).padding(.vertical, 7)
             .foregroundStyle(Palette.ink)
-            .background(Color.white.opacity(configuration.isPressed ? 0.13 : 0.07), in: Capsule())
+            .background(Color.white.opacity(0.07), in: Capsule())
             .overlay(Capsule().stroke(Palette.line))
+            .pressedResponse(configuration.isPressed, in: Capsule())
+            .focusHalo(Palette.ink, pressed: configuration.isPressed, in: Capsule())
+    }
+}
+
+/// Amber while it only reports READ ONLY, red once it offers to close.
+private struct PreviewActiveButtonStyle: ButtonStyle {
+    let closing: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let tint = closing ? Palette.red : Palette.amber
+        return configuration.label
+            .font(.custom("Avenir Next Demi Bold", size: 11))
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .foregroundStyle(tint)
+            .background(tint.opacity(0.13), in: Capsule())
+            .overlay(Capsule().stroke(tint.opacity(0.45)))
+            .pressedResponse(configuration.isPressed, in: Capsule())
+            .focusHalo(tint, pressed: configuration.isPressed, in: Capsule())
+            .animation(.easeOut(duration: 0.12), value: closing)
     }
 }
 
@@ -641,8 +812,10 @@ private struct DangerButtonStyle: ButtonStyle {
             .font(.custom("Avenir Next Demi Bold", size: 11))
             .padding(.horizontal, 12).padding(.vertical, 7)
             .foregroundStyle(Palette.red)
-            .background(Palette.red.opacity(configuration.isPressed ? 0.18 : 0.09), in: Capsule())
+            .background(Palette.red.opacity(0.09), in: Capsule())
             .overlay(Capsule().stroke(Palette.red.opacity(0.35)))
+            .pressedResponse(configuration.isPressed, in: Capsule())
+            .focusHalo(Palette.red, pressed: configuration.isPressed, in: Capsule())
     }
 }
 
@@ -650,26 +823,31 @@ private struct QuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.custom("Avenir Next Demi Bold", size: 10))
-            .foregroundStyle(Palette.ink.opacity(configuration.isPressed ? 0.65 : 1))
+            .foregroundStyle(Palette.ink)
             .padding(.horizontal, 9).padding(.vertical, 6)
-            .background(Color.white.opacity(configuration.isPressed ? 0.10 : 0.045), in: RoundedRectangle(cornerRadius: 7))
+            .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+            .pressedResponse(configuration.isPressed, in: RoundedRectangle(cornerRadius: 7))
+            .focusHalo(Palette.ink, pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: 7))
     }
 }
 
 private struct QuietIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(Palette.ink.opacity(configuration.isPressed ? 0.55 : 0.9))
-            .background(Color.white.opacity(configuration.isPressed ? 0.12 : 0.055), in: RoundedRectangle(cornerRadius: 8))
+            .foregroundStyle(Palette.ink.opacity(0.9))
+            .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+            .pressedResponse(configuration.isPressed, in: RoundedRectangle(cornerRadius: 8))
+            .focusHalo(Palette.ink, pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
 private struct ClientChoiceButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Palette.raised.opacity(configuration.isPressed ? 0.72 : 1), in: RoundedRectangle(cornerRadius: 9))
+            .background(Palette.raised, in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Palette.line))
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .pressedResponse(configuration.isPressed, in: RoundedRectangle(cornerRadius: 9))
+            .focusHalo(Palette.mint, pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: 9))
     }
 }
 

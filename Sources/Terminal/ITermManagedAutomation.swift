@@ -3,9 +3,11 @@ import Foundation
 @MainActor
 public protocol ManagedITermAutomating: Sendable {
     func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError>
+    func enumerateSessionTTYs() async -> Result<[String], SmokeAutomationError>
     func enumerateManagedSessions() async -> Result<[ManagedSessionEvidence], SmokeAutomationError>
     func createManagedSession(nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError>
-    func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError>
+    func requestManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<String, SmokeAutomationError>
+    func confirmManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String, requestID: String) async -> Result<Bool, SmokeAutomationError>
     func focusExactSession(_ reference: ManagedTerminalReference) async -> Result<ManagedTerminalReference, SmokeAutomationError>
     func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError>
 }
@@ -39,24 +41,37 @@ public enum ITermManagedScripts {
         return "'\(helperPath.path)' --supervise \(nonce)"
     }
 
+    /// Ownership evidence, so a window that vanishes mid-loop is counted instead
+    /// of failing the script or, worse, silently shrinking the evidence. A
+    /// record is demoted when its window is absent from this list, and that
+    /// conclusion may only be drawn from a complete pass.
     public static let enumerate = """
     with timeout of 5 seconds
         tell application id "com.googlecode.iterm2"
             set resultRows to {}
+            set skippedCount to 0
             repeat with targetWindow in windows
-                set targetWindowID to id of targetWindow
-                set targetTabIndex to 0
-                repeat with targetTab in tabs of targetWindow
-                    set targetTabIndex to targetTabIndex + 1
-                    repeat with targetSession in sessions of targetTab
+                try
+                    set targetWindowID to id of targetWindow
+                    set targetTabIndex to 0
+                    repeat with targetTab in tabs of targetWindow
+                        set targetTabIndex to targetTabIndex + 1
                         try
-                            set targetNonce to variable targetSession named "user.tmuxRoomsNonce"
-                            if targetNonce is not missing value and targetNonce is not "" then set end of resultRows to {targetWindowID, targetTabIndex, unique ID of targetSession, tty of targetSession, targetNonce}
+                            repeat with targetSession in sessions of targetTab
+                                try
+                                    set targetNonce to variable targetSession named "user.tmuxRoomsNonce"
+                                    if targetNonce is not missing value and targetNonce is not "" then set end of resultRows to {targetWindowID, targetTabIndex, unique ID of targetSession, tty of targetSession, targetNonce}
+                                end try
+                            end repeat
+                        on error
+                            set skippedCount to skippedCount + 1
                         end try
                     end repeat
-                end repeat
+                on error
+                    set skippedCount to skippedCount + 1
+                end try
             end repeat
-            return resultRows
+            return {resultRows, skippedCount}
         end tell
     end timeout
     """
@@ -77,28 +92,29 @@ public enum ITermManagedScripts {
         """
     }
 
+    /// Focuses the exact session by addressing it, rather than searching for it.
+    ///
+    /// The reference already names the window, tab, session GUID, and TTY, so
+    /// walking every window to find it again only costs Apple Event round
+    /// trips, and each one freezes the app. Addressing is also no weaker: a
+    /// session GUID is unique, and every identifying field is verified after
+    /// the lookup, so anything that moved comes back as not found.
     public static func focus(_ reference: ManagedTerminalReference, nonce: String) throws -> String {
-        let guid = try AppleScriptLiteral.string(reference.sessionGUID), tty = try AppleScriptLiteral.string(reference.tty), nonce = try AppleScriptLiteral.string(nonce)
+        let guid = try AppleScriptLiteral.string(reference.sessionGUID)
+        let tty = try AppleScriptLiteral.string(reference.tty)
+        let nonce = try AppleScriptLiteral.string(nonce)
         return """
         with timeout of 5 seconds
             tell application id "com.googlecode.iterm2"
-                set exactMatches to {}
-                repeat with targetWindow in windows
-                    repeat with targetTab in tabs of targetWindow
-                        repeat with targetSession in sessions of targetTab
-                            try
-                                set targetNonce to variable targetSession named "user.tmuxRoomsNonce"
-                                if unique ID of targetSession is \(guid) and tty of targetSession is \(tty) and targetNonce is \(nonce) then set end of exactMatches to {targetWindow, targetTab, targetSession}
-                            end try
-                        end repeat
-                    end repeat
-                end repeat
-                if (count of exactMatches) is 0 then return {"not-found"}
-                if (count of exactMatches) is greater than 1 then return {"ambiguous"}
-                set exactMatch to item 1 of exactMatches
-                set matchedWindow to item 1 of exactMatch
-                set matchedTab to item 2 of exactMatch
-                set matchedSession to item 3 of exactMatch
+                try
+                    set matchedWindow to window id \(reference.windowID)
+                    set matchedTab to tab \(reference.tabIndex) of matchedWindow
+                    set matchedSession to session id \(guid) of matchedTab
+                    if tty of matchedSession is not \(tty) then return {"not-found"}
+                    if (variable matchedSession named "user.tmuxRoomsNonce") is not \(nonce) then return {"not-found"}
+                on error
+                    return {"not-found"}
+                end try
                 select matchedSession
                 select matchedTab
                 select matchedWindow
@@ -131,7 +147,6 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
         helperPath: ITermBundledHelperPath,
         titleHomeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         titlePollInterval: Duration = .milliseconds(100),
-        titleMaxPollAttempts: Int = 50,
         titleMaxLaunchAttempts: Int = 30,
         titleOverallTimeout: Duration = .seconds(8)
     ) {
@@ -141,31 +156,69 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
             runner: runner,
             homeDirectory: titleHomeDirectory,
             pollInterval: titlePollInterval,
-            maxPollAttempts: titleMaxPollAttempts,
             maxLaunchAttempts: titleMaxLaunchAttempts,
             overallTimeout: titleOverallTimeout
         )
     }
 
     public func enumerateSessions() async -> Result<[ManagedTerminalReference], SmokeAutomationError> {
-        switch await runner.execute(source: ITermSmokeScripts.enumerate) {
+        await enumerate(source: ITermSmokeScripts.enumerate) { value in
+            guard case let .list(items) = value, items.count == 3,
+                  case let .list(rows) = items[1], case let .integer(skipped) = items[2] else { return nil }
+            let references = rows.compactMap(Self.decodeReference)
+            guard references.count == rows.count else { return nil }
+            return (references, skipped)
+        }
+    }
+
+    /// Every session TTY, without the window and tab walk. See
+    /// `ITermSmokeScripts.enumerateTTYs` for why this exists.
+    public func enumerateSessionTTYs() async -> Result<[String], SmokeAutomationError> {
+        switch await runner.execute(source: ITermSmokeScripts.enumerateTTYs) {
         case let .failure(number, _): return .failure(map(number))
         case let .success(.list(items)):
             guard items.count == 2, case let .list(rows) = items[1] else { return .failure(.invalidReply) }
-            let references = rows.compactMap(Self.decodeReference)
-            return references.count == rows.count ? .success(references) : .failure(.invalidReply)
+            return .success(Self.flattenStrings(rows))
         case .success: return .failure(.invalidReply)
         }
     }
 
     public func enumerateManagedSessions() async -> Result<[ManagedSessionEvidence], SmokeAutomationError> {
-        switch await runner.execute(source: ITermManagedScripts.enumerate) {
-        case let .failure(number, _): return .failure(map(number))
-        case let .success(.list(rows)):
+        await enumerate(source: ITermManagedScripts.enumerate) { value in
+            guard case let .list(items) = value, items.count == 2,
+                  case let .list(rows) = items[0], case let .integer(skipped) = items[1] else { return nil }
             let values = rows.compactMap(Self.decodeEvidence)
-            return values.count == rows.count ? .success(values) : .failure(.invalidReply)
-        case .success: return .failure(.invalidReply)
+            guard values.count == rows.count else { return nil }
+            return (values, skipped)
         }
+    }
+
+    /// Runs an enumeration and, when the script had to skip a window or tab,
+    /// runs it once more before giving up.
+    ///
+    /// Skips come from iTerm mutating its own window list while a window opens
+    /// or closes, which settles in milliseconds. A second clean pass is worth
+    /// far more than reporting an incomplete terminal, and a still-dirty pass
+    /// is reported as a stale target rather than passed off as the truth.
+    private func enumerate<Value>(
+        source: String,
+        decode: @escaping (AppleScriptValue) -> (values: [Value], skipped: Int)?
+    ) async -> Result<[Value], SmokeAutomationError> {
+        var lastSkipped = 0
+        for attempt in 0..<2 {
+            switch await runner.execute(source: source) {
+            case let .failure(number, _): return .failure(map(number))
+            case let .success(value):
+                guard let decoded = decode(value) else { return .failure(.invalidReply) }
+                guard decoded.skipped > 0 else { return .success(decoded.values) }
+                lastSkipped = decoded.skipped
+                if attempt == 0 {
+                    RoomsLog.terminal.notice("iterm.enumeration_retry skipped=\(decoded.skipped, privacy: .public)")
+                }
+            }
+        }
+        RoomsLog.terminal.error("iterm.enumeration_incomplete skipped=\(lastSkipped, privacy: .public)")
+        return .failure(.staleTarget)
     }
 
     public func createManagedSession(nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
@@ -180,8 +233,15 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
         } catch { return .failure(.invalidReply) }
     }
 
-    public func setManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
-        await titleTransport.setTitle(reference, nonce: nonce, title: title)
+    public func requestManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String) async -> Result<String, SmokeAutomationError> {
+        await titleTransport.requestTitle(reference, nonce: nonce, title: title)
+    }
+
+    public func confirmManagedSessionTitle(_ reference: ManagedTerminalReference, nonce: String, title: String, requestID: String) async -> Result<Bool, SmokeAutomationError> {
+        switch await titleTransport.confirmTitle(reference, nonce: nonce, title: title, requestID: requestID) {
+        case let .success(applied): return .success(applied != nil)
+        case let .failure(error): return .failure(error)
+        }
     }
 
     public func focusManagedSession(_ reference: ManagedTerminalReference, nonce: String) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
@@ -202,6 +262,20 @@ public struct ITermManagedAutomation: ManagedITermAutomating {
         switch await ITermAutomationSmoke(runner: runner).focus(reference: smokeReference, provenance: .external) {
         case let .success(actual): return .success(.init(windowID: actual.windowID, tabIndex: actual.tabIndex, sessionGUID: actual.sessionGUID, tty: actual.tty))
         case let .failure(error): return .failure(error)
+        }
+    }
+
+    /// A plural chain answers in the shape it was asked in: one list per
+    /// window, one per tab inside it, then the session values. The TTY map only
+    /// counts values, so the nesting is walked and the leaves collected. Empty
+    /// values belong to sessions with no pty of their own and are dropped.
+    private static func flattenStrings(_ values: [AppleScriptValue]) -> [String] {
+        values.flatMap { value -> [String] in
+            switch value {
+            case let .string(text): text.isEmpty ? [] : [text]
+            case let .list(nested): flattenStrings(nested)
+            default: []
+            }
         }
     }
 

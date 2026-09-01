@@ -156,7 +156,6 @@ struct ITermPythonTitleTransport {
     private let runner: any AppleScriptRunning
     private let homeDirectory: URL
     private let pollInterval: Duration
-    private let maxPollAttempts: Int
     private let maxLaunchAttempts: Int
     private let overallTimeout: Duration
 
@@ -164,23 +163,26 @@ struct ITermPythonTitleTransport {
         runner: any AppleScriptRunning,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         pollInterval: Duration = .milliseconds(100),
-        maxPollAttempts: Int = 50,
         maxLaunchAttempts: Int = 30,
         overallTimeout: Duration = .seconds(8)
     ) {
         self.runner = runner
         self.homeDirectory = homeDirectory
         self.pollInterval = pollInterval
-        self.maxPollAttempts = max(1, maxPollAttempts)
         self.maxLaunchAttempts = max(1, maxLaunchAttempts)
         self.overallTimeout = max(.zero, overallTimeout)
     }
 
-    func setTitle(
+    /// Hands iTerm the title and returns the id identifying this attempt.
+    ///
+    /// It does not wait for the title to land. Waiting costs one Apple Event
+    /// per poll, each one walking every window and tab, and each one freezing
+    /// the app for its whole round trip.
+    func requestTitle(
         _ reference: ManagedTerminalReference,
         nonce: String,
         title: String
-    ) async -> Result<ManagedTerminalReference, SmokeAutomationError> {
+    ) async -> Result<String, SmokeAutomationError> {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: overallTimeout)
         guard isActive(clock: clock, deadline: deadline) else { return .failure(.timeout) }
@@ -202,14 +204,13 @@ struct ITermPythonTitleTransport {
                 scriptName: scriptURL.lastPathComponent
             )
 
-            var launched = false
             for attempt in 0..<maxLaunchAttempts {
                 guard isActive(clock: clock, deadline: deadline) else { return .failure(.timeout) }
                 let execution = await runner.execute(source: launchSource)
                 guard isActive(clock: clock, deadline: deadline) else { return .failure(.timeout) }
                 switch execution {
                 case .success(.list([.string("launched")])):
-                    launched = true
+                    return .success(requestID)
                 case .success(.list([.string("not-found")])):
                     return .failure(.notFound)
                 case .success(.list([.string("ambiguous")])):
@@ -222,40 +223,40 @@ struct ITermPythonTitleTransport {
                 case .success:
                     return .failure(.invalidReply)
                 }
-                if launched { break }
-            }
-            guard launched else { return .failure(.timeout) }
-
-            let statusSource = try ITermPythonTitleScripts.status(
-                reference,
-                nonce: nonce,
-                title: title,
-                requestID: requestID
-            )
-            for attempt in 0..<maxPollAttempts {
-                guard isActive(clock: clock, deadline: deadline) else { return .failure(.timeout) }
-                let execution = await runner.execute(source: statusSource)
-                guard isActive(clock: clock, deadline: deadline) else { return .failure(.timeout) }
-                switch execution {
-                case let .success(value) where decodeEvidence(value, nonce: nonce) == reference:
-                    return .success(reference)
-                case .success(.list([.string("pending")])):
-                    if attempt + 1 < maxPollAttempts {
-                        guard await pause(clock: clock, until: deadline) else { return .failure(.timeout) }
-                    }
-                case .success(.list([.string("not-found")])):
-                    return .failure(.notFound)
-                case .success(.list([.string("ambiguous")])):
-                    return .failure(.ambiguous)
-                case let .failure(number, _):
-                    return .failure(map(number))
-                case .success:
-                    return .failure(.staleTarget)
-                }
             }
             return .failure(.timeout)
         } catch {
             return .failure(.invalidReply)
+        }
+    }
+
+    /// One check of whether a requested title landed on the exact session.
+    /// `.success(nil)` means iTerm has not applied it yet.
+    func confirmTitle(
+        _ reference: ManagedTerminalReference,
+        nonce: String,
+        title: String,
+        requestID: String
+    ) async -> Result<ManagedTerminalReference?, SmokeAutomationError> {
+        let statusSource: String
+        do {
+            statusSource = try ITermPythonTitleScripts.status(reference, nonce: nonce, title: title, requestID: requestID)
+        } catch {
+            return .failure(.invalidReply)
+        }
+        switch await runner.execute(source: statusSource) {
+        case let .success(value) where decodeEvidence(value, nonce: nonce) == reference:
+            return .success(reference)
+        case .success(.list([.string("pending")])):
+            return .success(nil)
+        case .success(.list([.string("not-found")])):
+            return .failure(.notFound)
+        case .success(.list([.string("ambiguous")])):
+            return .failure(.ambiguous)
+        case let .failure(number, _):
+            return .failure(map(number))
+        case .success:
+            return .failure(.staleTarget)
         }
     }
 

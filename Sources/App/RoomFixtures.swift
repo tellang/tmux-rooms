@@ -4,6 +4,8 @@ import TmuxRoomsCore
 
 @MainActor
 final class FixtureRoomActionHandler: RoomActionHandling {
+    var previewProgress: (@MainActor (ManagedPreviewState) -> Void)?
+
     private let snapshot: RoomSnapshot
 
     init(snapshot: RoomSnapshot) {
@@ -11,7 +13,11 @@ final class FixtureRoomActionHandler: RoomActionHandling {
     }
 
     func perform(_ intent: RoomActionIntent) async -> AppActionResult {
-        .succeeded(snapshot: isRefresh(intent) || isDelete(intent) ? snapshot : nil, focusableClients: nil)
+        .succeeded(
+            snapshot: isRefresh(intent) || isDelete(intent) ? snapshot : nil,
+            focusableClients: nil,
+            preview: nil
+        )
     }
 
     private func isRefresh(_ intent: RoomActionIntent) -> Bool {
@@ -34,6 +40,7 @@ enum UIFixture: String, CaseIterable {
     case oneFocusable = "v1-one-focusable"
     case twoMixed = "v1-two-mixed"
     case readOnlyPreview = "v1-read-only-preview"
+    case foreignReadOnly = "v1-foreign-read-only"
     case automationDenied = "v1-automation-denied"
     case stale = "v1-stale"
     case timeout = "v1-timeout"
@@ -58,6 +65,7 @@ enum UIFixture: String, CaseIterable {
             fixtureIdentifier: rawValue,
             isFixture: true,
             agentPresence: definition.agentPresence,
+            previewTarget: definition.previewTarget,
             handler: FixtureRoomActionHandler(snapshot: definition.snapshot)
         )
     }
@@ -107,7 +115,13 @@ enum UIFixture: String, CaseIterable {
         case .readOnlyPreview:
             let interactive = Fixtures.client(name: "tty-edit", pid: 401)
             let preview = Fixtures.client(name: "preview-read-only", pid: 402, readOnly: true)
-            return Definition(snapshot: Fixtures.snapshot([Fixtures.room(name: "preview-room", id: "$5", clients: [interactive, preview])]))
+            let room = Fixtures.room(name: "preview-room", id: "$5", clients: [interactive, preview])
+            return Definition(snapshot: Fixtures.snapshot([room]), previewTarget: room.token)
+        case .foreignReadOnly:
+            let interactive = Fixtures.client(name: "tty-edit", pid: 403)
+            let foreign = Fixtures.client(name: "someone-elses-read-only", pid: 404, readOnly: true)
+            let room = Fixtures.room(name: "foreign-preview-room", id: "$12", clients: [interactive, foreign])
+            return Definition(snapshot: Fixtures.snapshot([room]))
         case .automationDenied:
             return Definition(snapshot: Fixtures.snapshot([basic]), issue: .automationDeniedFixture)
         case .stale:
@@ -148,6 +162,7 @@ enum UIFixture: String, CaseIterable {
         var focusability: [ClientKey: ClientFocusability] = [:]
         var blocksActions = false
         var agentPresence: [String: AgentPresence] = [:]
+        var previewTarget: SessionToken?
     }
 }
 

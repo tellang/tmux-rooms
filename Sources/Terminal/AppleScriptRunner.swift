@@ -22,7 +22,35 @@ public protocol AppleScriptRunning: Sendable {
 public final class FoundationAppleScriptRunner: AppleScriptRunning {
     public init() {}
 
+    /// Apple Events run on the main thread by contract, so every one of them is
+    /// a frozen window for its duration. The slow ones are recorded because a
+    /// user who reports "it hangs for a second" has no other way to point at
+    /// which round trip did it.
     public func execute(source: String) async -> AppleScriptExecution {
+        let started = ContinuousClock.now
+        let result = perform(source: source)
+        let elapsed = ContinuousClock.now - started
+        let milliseconds = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+        if milliseconds >= 100 {
+            RoomsLog.terminal.notice(
+                "applescript.slow trace=\(ActionTrace.currentID, privacy: .public) ms=\(milliseconds, privacy: .public) script=\(Self.label(for: source), privacy: .public)"
+            )
+        }
+        return result
+    }
+
+    /// Names the round trip without logging the script or anything it carries.
+    private static func label(for source: String) -> String {
+        if source.contains("create window") { return "create" }
+        if source.contains("launch API script") { return "title-launch" }
+        if source.contains("user.tmuxRoomsTitleApplied") { return "title-status" }
+        if source.contains("exactMatches") { return "focus" }
+        if source.contains("user.tmuxRoomsNonce") { return "enumerate-managed" }
+        if source.contains("return {version") { return "enumerate" }
+        return "other"
+    }
+
+    private func perform(source: String) -> AppleScriptExecution {
         var error: NSDictionary?
         guard let script = NSAppleScript(source: source) else {
             return .failure(number: nil, message: "Unable to compile AppleScript")

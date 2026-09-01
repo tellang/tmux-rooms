@@ -70,6 +70,9 @@ final class RoomsStore: ObservableObject {
     /// The agent occupying each room, keyed by tmux session id. Rooms without a
     /// coding agent are absent from the dictionary and keep their tmux name.
     @Published private(set) var agentPresence: [String: AgentPresence]
+    /// The room the app-owned Preview window is showing, if any. Only that room
+    /// offers Close Preview, because there is exactly one Preview window.
+    @Published private(set) var previewTarget: SessionToken?
     #if DEBUG
     @Published private(set) var fixtureIdentifier: String?
     #endif
@@ -95,6 +98,7 @@ final class RoomsStore: ObservableObject {
         isFixture: Bool,
         agentPresence: [String: AgentPresence] = [:],
         agentTracker: AgentPresenceTracker? = nil,
+        previewTarget: SessionToken? = nil,
         handler: any RoomActionHandling
     ) {
         self.snapshot = snapshot
@@ -102,6 +106,7 @@ final class RoomsStore: ObservableObject {
         self.issue = issue
         self.agentPresence = agentPresence
         self.agentTracker = agentTracker
+        self.previewTarget = previewTarget
         self.focusability = focusability
         self.fixtureDefaultFocusability = fixtureDefaultFocusability
         self.fixtureBlocksActions = fixtureBlocksActions
@@ -110,6 +115,20 @@ final class RoomsStore: ObservableObject {
         #endif
         self.isFixture = isFixture
         self.handler = handler
+        observeActionProgress()
+    }
+
+    /// An action reports the Preview window as soon as it owns one, seconds
+    /// before the whole action finishes, so the button stops lying while the
+    /// launch settles.
+    private func observeActionProgress() {
+        handler.previewProgress = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .absent: self.previewTarget = nil
+            case let .active(token): self.previewTarget = token
+            }
+        }
     }
 
     static func production() -> RoomsStore {
@@ -185,6 +204,15 @@ final class RoomsStore: ObservableObject {
         Task { await perform(.preview(session: room.token)) }
     }
 
+    /// Whether this room is the one the Preview window is currently showing.
+    func isPreviewing(_ room: SessionRoom) -> Bool {
+        previewTarget == room.token
+    }
+
+    func closePreview(_ room: SessionRoom) {
+        Task { await perform(.closePreview(session: room.token)) }
+    }
+
     func duplicate(_ room: SessionRoom) {
         Task { await perform(.duplicateWindow(session: room.token)) }
     }
@@ -226,9 +254,11 @@ final class RoomsStore: ObservableObject {
         phase = replacement.phase
         issue = replacement.issue
         agentPresence = replacement.agentPresence
+        previewTarget = replacement.previewTarget
         chooser = nil
         deleteConfirmation = nil
         handler = replacement.handler
+        observeActionProgress()
         focusability = replacement.focusability
         fixtureDefaultFocusability = replacement.fixtureDefaultFocusability
         fixtureBlocksActions = replacement.fixtureBlocksActions
@@ -242,8 +272,25 @@ final class RoomsStore: ObservableObject {
     #endif
 
     private func perform(_ intent: RoomActionIntent) async {
-        guard phase == .idle else { return }
+        guard phase == .idle else {
+            RoomsLog.actions.notice(
+                """
+                action.dropped trace=\(ActionTrace.currentID, privacy: .public) \
+                intent=\(intent.fixtureSummary, privacy: .public) \
+                phase=\(String(describing: self.phase), privacy: .public)
+                """
+            )
+            return
+        }
         let issueBeforeRefresh = issue
+        let previewBefore = previewTarget
+        let trace = ActionTrace.begin()
+        defer { trace.finish() }
+        if !isAutomaticRefresh(intent) {
+            RoomsLog.actions.notice(
+                "action.requested trace=\(trace.id, privacy: .public) intent=\(intent.fixtureSummary, privacy: .public)"
+            )
+        }
         let generation = fixtureGeneration
         if isFixture {
             fixtureActionCount += 1
@@ -262,7 +309,7 @@ final class RoomsStore: ObservableObject {
         let result = await handler.perform(intent)
         guard generation == fixtureGeneration else { return }
         switch result {
-        case let .succeeded(updated, focusableClients):
+        case let .succeeded(updated, focusableClients, preview):
             if let updated {
                 snapshot = updated
                 await refreshAgentPresence(for: updated.rooms, generation: generation)
@@ -270,9 +317,16 @@ final class RoomsStore: ObservableObject {
             if let focusableClients {
                 focusability = Dictionary(uniqueKeysWithValues: focusableClients.map { ($0, .focusable) })
             }
+            switch preview {
+            case .absent: previewTarget = nil
+            case let .active(token): previewTarget = token
+            case nil: break
+            }
             issue = issueAfterSuccessfulRefresh(intent, previous: issueBeforeRefresh)
+            log(intent, trace: trace, outcome: "succeeded", previewBefore: previewBefore)
         case .unavailable(.clientCannotBeFocused):
             issue = AppIssue(kind: .terminalUnavailable, title: "Client unavailable", message: "The selected client cannot be focused.", diagnostics: nil, retry: .none)
+            log(intent, trace: trace, outcome: "unavailable(clientCannotBeFocused)", previewBefore: previewBefore)
         case .failed(let failure):
             if isAutomaticRefresh(intent),
                case .tmux = failure,
@@ -281,6 +335,7 @@ final class RoomsStore: ObservableObject {
             } else {
                 issue = Self.issue(for: failure, retrying: intent)
             }
+            log(intent, trace: trace, outcome: "failed(\(failure))", previewBefore: previewBefore)
         }
         if isFixture { fixtureActiveActions -= 1 }
         phase = .idle
@@ -293,6 +348,29 @@ final class RoomsStore: ObservableObject {
         guard await agentTracker.refresh(rooms: rooms) else { return }
         guard generation == fixtureGeneration else { return }
         agentPresence = agentTracker.presence
+    }
+
+    /// One line per finished action.
+    ///
+    /// The cadence fires an automatic refresh every second, so those stay quiet
+    /// unless they actually moved something. Everything a person triggered is
+    /// recorded either way, because that is the line worth having later.
+    private func log(_ intent: RoomActionIntent, trace: ActionTrace, outcome: String, previewBefore: SessionToken?) {
+        let previewChanged = previewBefore != previewTarget
+        guard !isAutomaticRefresh(intent) || previewChanged || issue != nil else { return }
+        RoomsLog.actions.notice(
+            """
+            action.finished trace=\(trace.id, privacy: .public) \
+            intent=\(intent.fixtureSummary, privacy: .public) \
+            outcome=\(outcome, privacy: .public) \
+            ms=\(trace.elapsedMilliseconds, privacy: .public) \
+            rooms=\(self.snapshot.rooms.count, privacy: .public) \
+            focusable=\(self.focusability.values.filter(\.isFocusable).count, privacy: .public) \
+            preview=\(self.previewTarget?.sessionID ?? "none", privacy: .public) \
+            previewChanged=\(previewChanged, privacy: .public) \
+            issue=\(self.issue?.kind.rawValue ?? "none", privacy: .public)
+            """
+        )
     }
 
     private func isRefresh(_ intent: RoomActionIntent) -> Bool {

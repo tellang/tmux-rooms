@@ -78,7 +78,7 @@ func pythonTitleAppleScriptsCompile() throws {
     #expect(scripts[1].contains("user.tmuxRoomsTitleApplied"))
 }
 
-@Test("Python title transport waits for exact applied evidence")
+@Test("Python title transport separates the request from the exact applied evidence")
 @MainActor
 func pythonTitleTransportSuccess() async throws {
     let nonce = ManagedNonce.generate()
@@ -89,9 +89,16 @@ func pythonTitleTransportSuccess() async throws {
     ])
     let home = FileManager.default.temporaryDirectory.appending(path: "tmux-rooms-title-success-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: home) }
-    let transport = ITermPythonTitleTransport(runner: runner, homeDirectory: home, pollInterval: .zero, maxPollAttempts: 3)
+    let transport = ITermPythonTitleTransport(runner: runner, homeDirectory: home, pollInterval: .zero)
 
-    #expect(await transport.setTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .success(titleReference))
+    let requested = await transport.requestTitle(titleReference, nonce: nonce, title: "READ ONLY · room")
+    guard case let .success(requestID) = requested else {
+        Issue.record("title request did not launch")
+        return
+    }
+    // A title that has not landed yet is reported as such, never as applied.
+    #expect(await transport.confirmTitle(titleReference, nonce: nonce, title: "READ ONLY · room", requestID: requestID) == .success(nil))
+    #expect(await transport.confirmTitle(titleReference, nonce: nonce, title: "READ ONLY · room", requestID: requestID) == .success(titleReference))
     #expect(runner.sources.count == 3)
     #expect(runner.sources[0].contains("launch API script named"))
     #expect(runner.sources[1].contains("user.tmuxRoomsTitleApplied"))
@@ -104,8 +111,7 @@ func pythonTitleTransportRetriesScriptDiscovery() async {
     let runner = CapturingTitleRunner([
         .failure(number: 2, message: "Script not found"),
         .failure(number: 2, message: "Script not found"),
-        .success(.list([.string("launched")])),
-        .success(.list([.integer(41), .integer(2), .string("GUID-TITLE-1"), .string("/dev/ttys077"), .string(nonce)]))
+        .success(.list([.string("launched")]))
     ])
     let home = FileManager.default.temporaryDirectory.appending(path: "tmux-rooms-title-discovery-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: home) }
@@ -113,13 +119,15 @@ func pythonTitleTransportRetriesScriptDiscovery() async {
         runner: runner,
         homeDirectory: home,
         pollInterval: .zero,
-        maxPollAttempts: 1,
         maxLaunchAttempts: 3
     )
 
-    #expect(await transport.setTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .success(titleReference))
-    #expect(runner.sources.count == 4)
-    #expect(runner.sources.prefix(3).allSatisfy { $0.contains("launch API script named") })
+    guard case .success = await transport.requestTitle(titleReference, nonce: nonce, title: "READ ONLY · room") else {
+        Issue.record("bounded discovery did not recover")
+        return
+    }
+    #expect(runner.sources.count == 3)
+    #expect(runner.sources.allSatisfy { $0.contains("launch API script named") })
 }
 
 @Test("Python title transport preserves install failures")
@@ -132,7 +140,7 @@ func pythonTitleTransportInstallFailure() async throws {
     let runner = CapturingTitleRunner([])
     let transport = ITermPythonTitleTransport(runner: runner, homeDirectory: home)
 
-    #expect(await transport.setTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .failure(.scriptInstallFailed))
+    #expect(await transport.requestTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .failure(.scriptInstallFailed))
     #expect(runner.sources.isEmpty)
 }
 
@@ -149,7 +157,7 @@ func pythonTitleTransportDeadlineAndCancellation() async {
         homeDirectory: root.appending(path: "expired"),
         overallTimeout: .zero
     )
-    #expect(await expired.setTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .failure(.timeout))
+    #expect(await expired.requestTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .failure(.timeout))
     #expect(expiredRunner.sources.isEmpty)
 
     let cancelledRunner = CapturingTitleRunner([
@@ -164,7 +172,7 @@ func pythonTitleTransportDeadlineAndCancellation() async {
         overallTimeout: .seconds(20)
     )
     let task = Task { @MainActor in
-        await cancelled.setTitle(titleReference, nonce: nonce, title: "READ ONLY · room")
+        await cancelled.requestTitle(titleReference, nonce: nonce, title: "READ ONLY · room")
     }
     while cancelledRunner.sources.isEmpty { await Task.yield() }
     task.cancel()
@@ -180,15 +188,15 @@ func pythonTitleTransportFailureModes() async {
     defer { try? FileManager.default.removeItem(at: home) }
 
     let missing = CapturingTitleRunner([.success(.list([.string("not-found")]))])
-    let missingTransport = ITermPythonTitleTransport(runner: missing, homeDirectory: home, pollInterval: .zero, maxPollAttempts: 1)
-    #expect(await missingTransport.setTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .failure(.notFound))
+    let missingTransport = ITermPythonTitleTransport(runner: missing, homeDirectory: home, pollInterval: .zero)
+    #expect(await missingTransport.requestTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .failure(.notFound))
 
-    let pending = CapturingTitleRunner([
-        .success(.list([.string("launched")])),
-        .success(.list([.string("pending")]))
-    ])
-    let pendingTransport = ITermPythonTitleTransport(runner: pending, homeDirectory: home, pollInterval: .zero, maxPollAttempts: 1)
-    #expect(await pendingTransport.setTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .failure(.timeout))
+    let stale = CapturingTitleRunner([.success(.list([.string("not-found")]))])
+    let staleTransport = ITermPythonTitleTransport(runner: stale, homeDirectory: home, pollInterval: .zero)
+    #expect(
+        await staleTransport.confirmTitle(titleReference, nonce: nonce, title: "READ ONLY · room", requestID: ManagedNonce.generate())
+            == .failure(.notFound)
+    )
 }
 
 @Test("managed iTerm automation routes titles through the Python transport")
@@ -207,11 +215,18 @@ func managedAutomationUsesPythonTitleTransport() async throws {
         helperPath: helper,
         titleHomeDirectory: home,
         titlePollInterval: .zero,
-        titleMaxPollAttempts: 1,
         titleMaxLaunchAttempts: 1
     )
 
-    #expect(await automation.setManagedSessionTitle(titleReference, nonce: nonce, title: "READ ONLY · room") == .success(titleReference))
+    let requested = await automation.requestManagedSessionTitle(titleReference, nonce: nonce, title: "READ ONLY · room")
+    guard case let .success(requestID) = requested else {
+        Issue.record("title request did not reach the transport")
+        return
+    }
+    #expect(
+        await automation.confirmManagedSessionTitle(titleReference, nonce: nonce, title: "READ ONLY · room", requestID: requestID)
+            == .success(true)
+    )
     #expect(runner.sources.count == 2)
     #expect(runner.sources.allSatisfy { !$0.contains("set title of matchedTab") })
 }

@@ -37,3 +37,12 @@
 - Harden any public updater and its software supply chain before distributing updates outside the local development workflow.
 
 **Provenance:** This repo-local append intentionally changes `TODOS.md` byte identity; the external source follow-up artifact remains unchanged.
+
+## Menu bar panel that survives focus changes
+
+- **What:** Replace `MenuBarExtra` with an app-owned `NSStatusItem` plus an `NSPanel` so the room list stays on screen when another app takes focus.
+- **Why:** Open, Preview, and Close Preview all end with iTerm activating, and the SwiftUI panel dismisses itself the moment the app deactivates, so the list disappears on every action.
+- **Pros:** The user can act on several rooms in a row, and Close Preview stops being a one-shot that hides its own result.
+- **Cons:** The app takes over panel placement, lifetime, and dismissal rules that SwiftUI currently owns, including status item click, Escape, and click outside.
+- **Context:** `MenuBarExtra` with `.menuBarExtraStyle(.window)` exposes no public knob for staying open; the panel is owned by SwiftUI and closes on resign key. An owned panel would set `hidesOnDeactivate` to false and a floating window level. The DEBUG fixture window scene and the XCUITests run against that separate scene, so they are unaffected.
+- **Depends on / blocked by:** Nothing in core v1. Deferred on 2026-09-01 while the Close Preview toggle shipped against the existing focus policy.

@@ -135,7 +135,7 @@ public struct SmokeCoordinator: Sendable {
             result = .evidenceWritten(try writer.write(evidence))
         } catch {
             let message = String(describing: error)
-            Logger(subsystem: "com.tellang.tmuxrooms", category: "iTerm-automation-smoke").error("Evidence write failed: \(message, privacy: .public)")
+            RoomsLog.smoke.error("smoke.evidence_unwritable error=\(message, privacy: .public)")
             result = .evidenceWriteFailed(message)
         }
         await terminate()

@@ -73,6 +73,10 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
     public var requestID: UUID?
     public var pendingSwitch: ManagedSwitchIntent?
     public var pendingPreviewTitle: String?
+    /// The title attempt already handed to iTerm, if one is in flight. Waiting
+    /// for a title to land costs several Apple Events, and every one of them
+    /// freezes the window, so the wait is left to a later pass.
+    public var pendingTitleRequestID: String?
     public var updatedAt: Date
 
     public init(
@@ -90,6 +94,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
         requestID: UUID? = nil,
         pendingSwitch: ManagedSwitchIntent? = nil,
         pendingPreviewTitle: String? = nil,
+        pendingTitleRequestID: String? = nil,
         updatedAt: Date = Date()
     ) {
         self.nonce = nonce
@@ -106,6 +111,7 @@ public struct ManagedClientRecord: Sendable, Codable, Equatable {
         self.requestID = requestID
         self.pendingSwitch = pendingSwitch
         self.pendingPreviewTitle = pendingPreviewTitle
+        self.pendingTitleRequestID = pendingTitleRequestID
         self.updatedAt = updatedAt
     }
 }

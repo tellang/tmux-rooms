@@ -89,7 +89,7 @@ struct RoomsStoreActionTests {
         let snapshot = appSnapshot(clientCount: 0)
         let handler = ScriptedRoomActionHandler(results: [
             .failed(.other("open failed")),
-            .succeeded(snapshot: snapshot, focusableClients: [])
+            .succeeded(snapshot: snapshot, focusableClients: [], preview: nil)
         ])
         let store = RoomsStore(snapshot: snapshot, isFixture: false, handler: handler)
 
@@ -129,7 +129,7 @@ struct RoomsStoreActionTests {
         let snapshot = appSnapshot(clientCount: 0)
         let candidate = recoveryCandidate(nonce: "RecoveryCandidate00000003", snapshot: snapshot)
         let handler = ScriptedRoomActionHandler(results: [
-            .succeeded(snapshot: snapshot, focusableClients: [])
+            .succeeded(snapshot: snapshot, focusableClients: [], preview: nil)
         ])
         let store = RoomsStore(
             snapshot: snapshot,
@@ -149,7 +149,7 @@ struct RoomsStoreActionTests {
     func cadenceClearsInventoryFailure() async throws {
         let snapshot = appSnapshot(clientCount: 0)
         let handler = ScriptedRoomActionHandler(results: [
-            .succeeded(snapshot: snapshot, focusableClients: [])
+            .succeeded(snapshot: snapshot, focusableClients: [], preview: nil)
         ])
         let store = RoomsStore(
             snapshot: snapshot,
@@ -177,6 +177,7 @@ struct RoomsStoreActionTests {
         let client = snapshot.rooms[0].interactiveClients[0]
         var recoveryCalls = 0
         var focusabilityCalls = 0
+        var previewCalls = 0
         let result = await ProductionRoomActionHandler.refreshResult(
             intent: .automaticRefresh(revalidateRecovery: false),
             snapshot: snapshot,
@@ -187,6 +188,10 @@ struct RoomsStoreActionTests {
             loadFocusableClients: {
                 focusabilityCalls += 1
                 return [client.key]
+            },
+            loadPreviewTarget: { _ in
+                previewCalls += 1
+                return snapshot.rooms[0].token
             }
         )
         let handler = ScriptedRoomActionHandler(results: [result])
@@ -202,8 +207,144 @@ struct RoomsStoreActionTests {
 
         #expect(recoveryCalls == 0)
         #expect(focusabilityCalls == 0)
+        #expect(previewCalls == 1)
         #expect(store.snapshot == snapshot)
         #expect(store.focusability(for: client) == .focusable)
+        #expect(store.isPreviewing(snapshot.rooms[0]))
+    }
+
+    @Test("a failed focusability lookup keeps what the app already verified")
+    func failedFocusabilityLookupKeepsPriorState() async throws {
+        let snapshot = appSnapshot(clientCount: 1)
+        let client = snapshot.rooms[0].interactiveClients[0]
+        let result = await ProductionRoomActionHandler.refreshResult(
+            intent: .refresh,
+            snapshot: snapshot,
+            loadRecovery: { [] },
+            loadFocusableClients: { nil },
+            loadPreviewTarget: { _ in nil }
+        )
+        let handler = ScriptedRoomActionHandler(results: [result])
+        let store = RoomsStore(
+            snapshot: .noServer,
+            focusability: [client.key: .focusable],
+            isFixture: false,
+            handler: handler
+        )
+
+        store.refresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+
+        #expect(store.snapshot == snapshot)
+        #expect(store.focusability(for: client) == .focusable)
+    }
+
+    @Test("an empty focusability answer still clears what is no longer focusable")
+    func emptyFocusabilityAnswerClearsPriorState() async throws {
+        let snapshot = appSnapshot(clientCount: 1)
+        let client = snapshot.rooms[0].interactiveClients[0]
+        let result = await ProductionRoomActionHandler.refreshResult(
+            intent: .refresh,
+            snapshot: snapshot,
+            loadRecovery: { [] },
+            loadFocusableClients: { [] },
+            loadPreviewTarget: { _ in nil }
+        )
+        let handler = ScriptedRoomActionHandler(results: [result])
+        let store = RoomsStore(
+            snapshot: .noServer,
+            focusability: [client.key: .focusable],
+            isFixture: false,
+            handler: handler
+        )
+
+        store.refresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+
+        #expect(!store.focusability(for: client).isFocusable)
+    }
+
+    @Test("a Preview reported mid-action flips the button before the action ends")
+    func previewProgressArrivesBeforeTheResult() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let room = snapshot.rooms[0]
+        let handler = ScriptedRoomActionHandler(results: [
+            .succeeded(snapshot: snapshot, focusableClients: [], preview: nil)
+        ])
+        let store = RoomsStore(snapshot: snapshot, isFixture: false, handler: handler)
+
+        #expect(!store.isPreviewing(room))
+        handler.previewProgress?(.active(room.token))
+        #expect(store.isPreviewing(room))
+
+        store.refresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+        #expect(store.isPreviewing(room))
+    }
+
+    @Test("only the previewed room offers Close Preview")
+    func previewTargetTracksTheManagedPreview() async throws {
+        let snapshot = appSnapshot(clientCount: 0, roomCount: 2)
+        let previewed = snapshot.rooms[0]
+        let other = snapshot.rooms[1]
+        let handler = ScriptedRoomActionHandler(results: [
+            .succeeded(snapshot: snapshot, focusableClients: [], preview: .active(previewed.token)),
+            .succeeded(snapshot: snapshot, focusableClients: [], preview: nil),
+            .succeeded(snapshot: snapshot, focusableClients: [], preview: .absent)
+        ])
+        let store = RoomsStore(snapshot: snapshot, isFixture: false, handler: handler)
+
+        store.refresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+        #expect(store.isPreviewing(previewed))
+        #expect(!store.isPreviewing(other))
+
+        store.refresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 2 }
+        #expect(store.isPreviewing(previewed))
+
+        store.refresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 3 }
+        #expect(store.previewTarget == nil)
+    }
+
+    @Test("Close Preview routes the exact previewed room")
+    func closePreviewRoutesExactRoom() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let room = snapshot.rooms[0]
+        let handler = RecordingRoomActionHandler(
+            snapshot: snapshot,
+            focusable: [],
+            preview: .active(room.token)
+        )
+        let store = RoomsStore(snapshot: snapshot, isFixture: false, handler: handler)
+
+        store.refresh()
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+        #expect(store.isPreviewing(room))
+        store.closePreview(room)
+        await appEventually { handler.intents.count == 2 }
+
+        #expect(handler.intents.last == .closePreview(session: room.token))
+    }
+
+    @Test("a Close Preview that lost its window reports a stale target")
+    func closePreviewStaleTargetIsTyped() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let room = snapshot.rooms[0]
+        let handler = ScriptedRoomActionHandler(results: [.failed(.staleTarget)])
+        let store = RoomsStore(
+            snapshot: snapshot,
+            isFixture: false,
+            previewTarget: room.token,
+            handler: handler
+        )
+
+        #expect(store.isPreviewing(room))
+        store.closePreview(room)
+        await appEventually { store.phase == .idle && handler.intents.count == 1 }
+
+        #expect(store.issue?.kind == .staleTarget)
     }
 
     @Test("candidate lookup permission denial is not hidden as an empty recovery list")
@@ -236,22 +377,25 @@ struct RoomsStoreActionTests {
 
 @MainActor
 private final class RecordingRoomActionHandler: RoomActionHandling {
+    var previewProgress: (@MainActor (ManagedPreviewState) -> Void)?
     let snapshot: RoomSnapshot
     let focusable: Set<ClientKey>
+    let preview: ManagedPreviewState?
     private(set) var intents: [RoomActionIntent] = []
 
-    init(snapshot: RoomSnapshot, focusable: Set<ClientKey>) {
-        self.snapshot = snapshot; self.focusable = focusable
+    init(snapshot: RoomSnapshot, focusable: Set<ClientKey>, preview: ManagedPreviewState? = nil) {
+        self.snapshot = snapshot; self.focusable = focusable; self.preview = preview
     }
 
     func perform(_ intent: RoomActionIntent) async -> AppActionResult {
         intents.append(intent)
-        return .succeeded(snapshot: snapshot, focusableClients: focusable)
+        return .succeeded(snapshot: snapshot, focusableClients: focusable, preview: preview)
     }
 }
 
 @MainActor
 private final class ScriptedRoomActionHandler: RoomActionHandling {
+    var previewProgress: (@MainActor (ManagedPreviewState) -> Void)?
     private var results: [AppActionResult]
     private(set) var intents: [RoomActionIntent] = []
 
@@ -291,9 +435,8 @@ private func recoveryIssue(_ candidates: [ManagedRecoveryCandidate]) -> AppIssue
     )
 }
 
-private func appSnapshot(clientCount: Int) -> RoomSnapshot {
+private func appSnapshot(clientCount: Int, roomCount: Int = 1) -> RoomSnapshot {
     let server = ServerIdentity(canonicalSocketPath: "/tmp/app-routing", socketDevice: 1, socketInode: 2, serverPID: 3, startedAtUnixSeconds: 4)
-    let token = SessionToken(server: server, sessionID: "$1", createdAtUnixSeconds: 5)
     let clients = (0..<clientCount).map { index in
         SessionRoom.Client(
             key: .init(server: server, clientName: "client-\(index)", tty: "/dev/ttys\(index)", clientPID: Int32(10 + index), createdAtUnixSeconds: Int64(20 + index)),
@@ -304,7 +447,16 @@ private func appSnapshot(clientCount: Int) -> RoomSnapshot {
             isControlMode: false
         )
     }
-    return .init(server: server, rooms: [.init(token: token, name: "room", lastActivityAtUnixSeconds: 6, panes: [], clients: clients)])
+    let rooms = (0..<roomCount).map { index in
+        SessionRoom(
+            token: SessionToken(server: server, sessionID: "$\(index + 1)", createdAtUnixSeconds: 5),
+            name: "room-\(index)",
+            lastActivityAtUnixSeconds: 6,
+            panes: [],
+            clients: index == 0 ? clients : []
+        )
+    }
+    return .init(server: server, rooms: rooms)
 }
 
 @MainActor

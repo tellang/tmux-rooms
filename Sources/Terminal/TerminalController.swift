@@ -26,10 +26,17 @@ public final class TerminalController: TerminalControlling {
         self.automation = automation; self.journal = journal; self.tmuxExecutablePath = tmuxExecutablePath
         self.supervisorClient = supervisorClient ?? ManagedSupervisorClient(journal: journal)
         self.liveness = liveness
-        self.lateFailureHandler = lateFailureHandler ?? { message in Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal").error("\(message, privacy: .public)") }
+        self.lateFailureHandler = lateFailureHandler ?? { message in RoomsLog.terminal.error("managed.late_absorb_failed \(message, privacy: .public)") }
     }
 
     public func ensureManaged(role: ManagedRole, destination: SessionToken, readOnly: Bool, snapshot: RoomSnapshot, softDeadline: Duration = .seconds(5)) async throws -> ManagedTerminalOutcome {
+        RoomsLog.terminal.notice(
+            """
+            managed.ensure trace=\(ActionTrace.currentID, privacy: .public) \
+            role=\(role.rawValue, privacy: .public) \
+            session=\(destination.sessionID, privacy: .public)
+            """
+        )
         let readOnly = role == .preview ? true : readOnly
         let unassigned = try journal.allRecords().filter { $0.launchKind == .reusableRole && $0.role == nil }
         if !unassigned.isEmpty {
@@ -97,8 +104,16 @@ public final class TerminalController: TerminalControlling {
         return try await launch(kind: .explicitDuplicate, role: nil, destination: destination, readOnly: readOnly, snapshot: snapshot, deadline: softDeadline)
     }
 
+    /// Focuses the client, reading ownership from the journal rather than
+    /// enumerating iTerm again.
+    ///
+    /// Callers reach here right after a pass that already enumerated, and a
+    /// second enumeration costs another Apple Event, which holds the main
+    /// thread and freezes the window. Exactness does not depend on it: the
+    /// focus scripts match the exact window, tab, session GUID, TTY, and nonce,
+    /// so a record that went stale in between fails closed as not found rather
+    /// than focusing something else.
     public func focus(clientKey: ClientKey, snapshot: RoomSnapshot) async throws -> TerminalFocusResult {
-        _ = try await reconcile(snapshot: snapshot)
         let matches = try journal.allRecords().filter { $0.liveClientKey == clientKey && ($0.state == .complete || $0.state == .recovered) }
         if matches.isEmpty {
             guard snapshot.rooms.flatMap(\.clients).contains(where: { $0.key == clientKey }), let tty = clientKey.tty else { throw ManagedTerminalError.notFound }
@@ -115,21 +130,38 @@ public final class TerminalController: TerminalControlling {
         }
     }
 
+    /// Which clients can be focused.
+    ///
+    /// The managed half comes from the journal, which the pass that preceded
+    /// this call already brought up to date. Only the local half needs to ask
+    /// iTerm, so this costs one Apple Event instead of two.
     public func focusableClientKeys(snapshot: RoomSnapshot) async throws -> Set<ClientKey> {
-        let records = try await reconcile(snapshot: snapshot)
+        let records = try journal.allRecords()
         let managed: Set<ClientKey> = Set(records.compactMap { record -> ClientKey? in
             guard record.state == .complete || record.state == .recovered else { return nil }
             return record.liveClientKey
         })
-        let references: [ManagedTerminalReference]
-        switch await automation.enumerateSessions() {
-        case let .success(value): references = value
+        let ttys: [String]
+        switch await automation.enumerateSessionTTYs() {
+        case let .success(value): ttys = value
         case let .failure(error): throw ManagedTerminalError.automation(error)
         }
-        let ttyCounts = Dictionary(grouping: references, by: \.tty).mapValues(\.count)
+        let ttyCounts = ttys.reduce(into: [String: Int]()) { counts, tty in counts[tty, default: 0] += 1 }
         let local = snapshot.rooms.flatMap(\.interactiveClients).compactMap { client -> ClientKey? in
             guard let tty = client.tty, ttyCounts[tty] == 1 else { return nil }
             return client.key
+        }
+        // A room list where nothing can be focused is the symptom users report,
+        // and the counts are the only way to tell which half went missing.
+        let clients = snapshot.rooms.flatMap(\.interactiveClients).count
+        if managed.isEmpty, local.isEmpty, clients > 0 {
+            RoomsLog.terminal.error(
+                """
+                focus.map_empty trace=\(ActionTrace.currentID, privacy: .public) \
+                sessions=\(ttys.count, privacy: .public) \
+                clients=\(clients, privacy: .public)
+                """
+            )
         }
         return managed.union(local)
     }
@@ -168,15 +200,7 @@ public final class TerminalController: TerminalControlling {
             if let title = resolved.pendingPreviewTitle,
                resolved.state == .complete || resolved.state == .recovered,
                let terminal = resolved.terminal {
-                switch await automation.setManagedSessionTitle(terminal, nonce: resolved.nonce, title: title) {
-                case .success:
-                    resolved.pendingPreviewTitle = nil
-                    resolved.updatedAt = Date()
-                    try journal.write(resolved)
-                case let .failure(error):
-                    Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal")
-                        .error("Preview title remains pending for \(resolved.nonce, privacy: .public): \(String(describing: error), privacy: .public)")
-                }
+                resolved = await advanceTitle(resolved, terminal: terminal, title: title)
             }
             reconciled.append(resolved)
         }
@@ -215,14 +239,10 @@ public final class TerminalController: TerminalControlling {
         if role == .preview, let terminal = selected.terminal {
             let title = Self.previewTitle(roomName: snapshot.rooms.first(where: { $0.token == selected.requestedSessionToken })?.name ?? selected.requestedSessionToken.sessionID)
             selected.pendingPreviewTitle = title
+            selected.pendingTitleRequestID = nil
             selected.updatedAt = Date()
             try journal.write(selected)
-            switch await automation.setManagedSessionTitle(terminal, nonce: selected.nonce, title: title) {
-            case .success: selected.pendingPreviewTitle = nil
-            case let .failure(error):
-                Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal")
-                    .error("Preview title remains pending for \(selected.nonce, privacy: .public): \(String(describing: error), privacy: .public)")
-            }
+            selected = await advanceTitle(selected, terminal: terminal, title: title)
         }
         for var conflict in records where conflict.launchKind == .reusableRole && conflict.nonce != nonce && conflict.role == role {
             conflict.role = nil
@@ -243,23 +263,123 @@ public final class TerminalController: TerminalControlling {
         guard let record = records.first(where: { $0.nonce == nonce }), record.launchKind == .reusableRole else {
             throw ManagedTerminalError.staleOwnership
         }
-        let handshake = try journal.readHandshake(nonce: nonce)
+        try await detachAndRetire(record, snapshot: snapshot)
+        return try await managedRecoveryCandidates(snapshot: snapshot)
+    }
+
+    /// Which room the managed Preview window is showing right now, or `nil` when
+    /// no Preview client of ours is attached.
+    ///
+    /// Journal and snapshot only. The room list asks this on every refresh, and
+    /// an Apple Event per refresh is not a price a button label can justify. The
+    /// journal is already current here because every refresh reconciles first.
+    public func managedPreviewTarget(snapshot: RoomSnapshot) throws -> SessionToken? {
+        guard let resolved = try resolvedPreviewRecord() else { return nil }
+        guard let key = resolved.liveClientKey,
+              snapshot.rooms.contains(where: { $0.clients.contains { $0.key == key } }) else { return nil }
+        return resolved.requestedSessionToken
+    }
+
+    /// The same answer without asking a snapshot to confirm the client.
+    ///
+    /// An action reconciles the record before the app publishes a snapshot that
+    /// contains the new client, so during those seconds the snapshot cannot
+    /// confirm what the journal already knows. The room list uses the checked
+    /// form; only an action in flight reads this one.
+    public func managedPreviewTargetInFlight() throws -> SessionToken? {
+        try resolvedPreviewRecord()?.requestedSessionToken
+    }
+
+    private func resolvedPreviewRecord() throws -> ManagedClientRecord? {
+        let records = try journal.reusableRecords(role: .preview)
+        guard records.count == 1, let record = records.first else { return nil }
+        guard record.state == .complete || record.state == .recovered, record.liveClientKey != nil else { return nil }
+        return record
+    }
+
+    /// Closes the managed Preview window. Detaching ends the tmux child, the
+    /// supervisor stops, and iTerm closes the session that was running it.
+    ///
+    /// Returns `false` when there is no Preview record to close, so a stale
+    /// button press is a no-op rather than a failure.
+    @discardableResult
+    public func closeManagedPreview(snapshot: RoomSnapshot) async throws -> Bool {
+        let records = try journal.reusableRecords(role: .preview)
+        guard records.count <= 1 else { throw ManagedTerminalError.ambiguous }
+        guard let record = records.first else {
+            RoomsLog.terminal.notice("preview.close_skipped trace=\(ActionTrace.currentID, privacy: .public) reason=no-record")
+            return false
+        }
+        try await detachAndRetire(record, snapshot: snapshot)
+        RoomsLog.terminal.notice(
+            "preview.closed trace=\(ActionTrace.currentID, privacy: .public) record=\(record.nonce, privacy: .public)"
+        )
+        return true
+    }
+
+    /// Ends the supervisor behind a managed record and retires it. Recovery
+    /// clean-up and Close Preview both mean the same thing: this window is done.
+    private func detachAndRetire(_ record: ManagedClientRecord, snapshot: RoomSnapshot) async throws {
+        let handshake = try journal.readHandshake(nonce: record.nonce)
         let provenDead = try (record.state == .provisional || record.state == .failed)
             && isProvablyGone(record, snapshot: snapshot)
         if provenDead {
             try journal.retire(record)
-            return try await managedRecoveryCandidates(snapshot: snapshot)
+            return
         }
-        guard handshake?.nonce == nonce || record.supervisorPID != nil else {
+        guard handshake?.nonce == record.nonce || record.supervisorPID != nil else {
             throw ManagedTerminalError.staleOwnership
         }
-        let request = ManagedSupervisorRequest(nonce: nonce, action: .detach)
+        let request = ManagedSupervisorRequest(nonce: record.nonce, action: .detach)
         let response = try await supervisorClient.send(request, deadline: .seconds(3))
         guard response.requestID == request.id, response.status == .completed, response.childPID == nil else {
             throw ManagedTerminalError.staleOwnership
         }
         try journal.retire(record, finalRequestID: request.id)
-        return try await managedRecoveryCandidates(snapshot: snapshot)
+    }
+
+    /// Moves a pending title one step and no further.
+    ///
+    /// A pass either hands iTerm the title or checks once whether an earlier
+    /// request landed. Both are a single Apple Event, and an Apple Event holds
+    /// the main thread for its whole round trip, so the old loop that waited
+    /// for the title to appear froze the window for seconds on every Preview.
+    /// The title is cosmetic; the wait was the only expensive part of it.
+    private func advanceTitle(_ record: ManagedClientRecord, terminal: ManagedTerminalReference, title: String) async -> ManagedClientRecord {
+        var record = record
+        do {
+            if let requestID = record.pendingTitleRequestID {
+                switch await automation.confirmManagedSessionTitle(terminal, nonce: record.nonce, title: title, requestID: requestID) {
+                case .success(true):
+                    record.pendingPreviewTitle = nil
+                    record.pendingTitleRequestID = nil
+                    record.updatedAt = Date()
+                    try journal.write(record)
+                case .success:
+                    break
+                case let .failure(error):
+                    record.pendingTitleRequestID = nil
+                    record.updatedAt = Date()
+                    try journal.write(record)
+                    RoomsLog.terminal
+                        .error("preview.title_unconfirmed record=\(record.nonce, privacy: .public) error=\(String(describing: error), privacy: .public)")
+                }
+                return record
+            }
+            switch await automation.requestManagedSessionTitle(terminal, nonce: record.nonce, title: title) {
+            case let .success(requestID):
+                record.pendingTitleRequestID = requestID
+                record.updatedAt = Date()
+                try journal.write(record)
+            case let .failure(error):
+                RoomsLog.terminal
+                    .error("preview.title_pending record=\(record.nonce, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+        } catch {
+            RoomsLog.terminal
+                .error("preview.title_journal record=\(record.nonce, privacy: .public) error=\(String(describing: error), privacy: .public)")
+        }
+        return record
     }
 
     /// Whether nothing is left that could still be driving this record: no live
@@ -389,7 +509,25 @@ public final class TerminalController: TerminalControlling {
         record.configurationState = .handshakeObserved
         record.state = [.timedOutButRunning, .launching, .provisional].contains(original.state) ? .recovered : .complete
         record.updatedAt = Date(); try journal.write(record)
+        Self.logTransition(from: original, to: record)
         return record
+    }
+
+    /// A managed record only ever changes state here and in the outcome paths
+    /// above, so this is the one place that has to report it.
+    private static func logTransition(from original: ManagedClientRecord, to record: ManagedClientRecord) {
+        guard original.state != record.state || original.liveClientKey != record.liveClientKey else { return }
+        RoomsLog.terminal.notice(
+            """
+            managed.transition trace=\(ActionTrace.currentID, privacy: .public) \
+            record=\(record.nonce, privacy: .public) \
+            role=\(record.role?.rawValue ?? "none", privacy: .public) \
+            \(original.state.rawValue, privacy: .public) -> \(record.state.rawValue, privacy: .public) \
+            session=\(record.requestedSessionToken.sessionID, privacy: .public) \
+            readOnly=\(record.readOnly, privacy: .public) \
+            client=\(record.liveClientKey == nil ? "none" : "attached", privacy: .public)
+            """
+        )
     }
 
     private func recoverPendingSwitch(_ original: ManagedClientRecord) throws -> (record: ManagedClientRecord, unresolved: Bool) {
@@ -442,7 +580,7 @@ public final class TerminalController: TerminalControlling {
             guard var record = try journal.read(nonce: nonce) else { throw ManagedTerminalError.invalidRecord }
             record.state = .failed; record.updatedAt = Date(); try journal.write(record)
         } catch {
-            Logger(subsystem: "com.tellang.tmuxrooms", category: "terminal").error("Unable to persist late failure for \(nonce, privacy: .public): \(String(describing: error), privacy: .public); original: \(message, privacy: .public)")
+            RoomsLog.terminal.error("managed.late_failure_unpersisted record=\(nonce, privacy: .public) error=\(String(describing: error), privacy: .public) original=\(message, privacy: .public)")
         }
     }
 

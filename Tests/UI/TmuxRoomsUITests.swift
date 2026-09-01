@@ -2,7 +2,17 @@ import XCTest
 
 @MainActor
 final class TmuxRoomsUITests: XCTestCase {
-    private var app: XCUIApplication!
+    /// One app for the whole class.
+    ///
+    /// Launching and terminating per test cost 2.2 seconds of the 4 to 5 a test
+    /// took, and bought nothing: the fixture switch already resets the store,
+    /// its counters, and any open sheet. Tests still start from a known state,
+    /// they just stop paying for a process to do it.
+    private static var sharedApp: XCUIApplication?
+    private var app: XCUIApplication! {
+        get { Self.sharedApp }
+        set { Self.sharedApp = newValue }
+    }
     private let fixtureWindowTitle = "Tmux Rooms Fixture"
     private let fastTimeout: TimeInterval = 1
     private let diagnosticTimeout: TimeInterval = 8
@@ -12,9 +22,12 @@ final class TmuxRoomsUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    override func tearDown() async throws {
-        terminateCurrentApp()
-        try await super.tearDown()
+    override class func tearDown() {
+        MainActor.assumeIsolated {
+            sharedApp?.terminate()
+            sharedApp = nil
+        }
+        super.tearDown()
     }
 
     func testNoServerAndDetachedRoomList() {
@@ -41,10 +54,27 @@ final class TmuxRoomsUITests: XCTestCase {
         XCTAssertTrue(waitForValue("1", at: "fixture.action.count"))
         XCTAssertTrue(waitForValueContaining("route=sole", at: "fixture.action.last"))
 
-        switchFixture(to: "v1-read-only-preview")
-        let previewID = roomID(5)
-        XCTAssertTrue(waitForExistence(textElement("room.\(previewID).preview-status")))
-        XCTAssertTrue(text(of: textElement("room.\(previewID).status")).contains("1 interactive"))
+        switchFixture(to: "v1-foreign-read-only")
+        let foreignID = roomID(12)
+        XCTAssertTrue(waitForExistence(textElement("room.\(foreignID).preview-status")))
+        XCTAssertTrue(text(of: textElement("room.\(foreignID).status")).contains("1 interactive"))
+        XCTAssertTrue(button("room.\(foreignID).preview").exists)
+    }
+
+    func testActivePreviewOffersCloseInsteadOfPreview() {
+        launch("v1-read-only-preview")
+        let id = roomID(5)
+        let closeID = "room.\(id).close-preview"
+
+        XCTAssertTrue(waitForExistence(button(closeID)))
+        XCTAssertEqual(button(closeID).label, "Close preview of preview-room")
+        XCTAssertTrue(waitForNonexistence(button("room.\(id).preview")))
+        // The state moved onto the button, so the line above the actions is gone.
+        XCTAssertFalse(textElement("room.\(id).preview-status").exists)
+
+        clickButton(closeID)
+        XCTAssertTrue(waitForValue("1", at: "fixture.action.count"))
+        XCTAssertTrue(waitForValue("close-preview", at: "fixture.action.last"))
     }
 
     func testTwoClientsRequireChooserAndCancelDoesNothing() {
@@ -221,7 +251,11 @@ final class TmuxRoomsUITests: XCTestCase {
     }
 
     private func launch(_ fixture: String) {
-        terminateCurrentApp()
+        if let running = app, running.state != .notRunning {
+            switchFixture(to: fixture)
+            XCTAssertTrue(waitForValue("0", at: "fixture.action.count"), "Fixture state did not reset for \(fixture)")
+            return
+        }
         let launched = XCUIApplication()
         launched.launchEnvironment["TMUX_ROOMS_UI_FIXTURE"] = fixture
         launched.launchArguments += ["--ui-testing"]
@@ -230,15 +264,6 @@ final class TmuxRoomsUITests: XCTestCase {
         launched.activate()
         XCTAssertTrue(waitForExistence(fixtureWindow))
         XCTAssertTrue(launched.state == .runningForeground || launched.state == .runningBackground)
-    }
-
-    private func terminateCurrentApp() {
-        guard let current = app else { return }
-        if current.state != .notRunning {
-            current.terminate()
-            XCTAssertTrue(current.wait(for: .notRunning, timeout: diagnosticTimeout))
-        }
-        app = nil
     }
 
     private func activateFixtureWindow() {
@@ -270,11 +295,11 @@ final class TmuxRoomsUITests: XCTestCase {
     }
 
     private func button(_ identifier: String) -> XCUIElement {
-        fixtureWindow.buttons[identifier]
+        fixtureWindow.buttons[identifier].firstMatch
     }
 
     private func textElement(_ identifier: String) -> XCUIElement {
-        fixtureWindow.staticTexts[identifier]
+        fixtureWindow.staticTexts[identifier].firstMatch
     }
 
     private func waitForExistence(_ element: XCUIElement, timeout: TimeInterval? = nil) -> Bool {
