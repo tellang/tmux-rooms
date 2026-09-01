@@ -218,7 +218,7 @@ build_atomic_swap_tool() {
 
 recover_pending_transaction() {
   local parent="$1" destination_path="$2"
-  local -a transactions
+  local -a transactions=()
   local transaction journal staged phase old_hash new_hash destination_hash staged_hash
   while IFS= read -r transaction; do transactions+=("$transaction"); done < <(find "$parent" -maxdepth 1 -type d -name '.tmux-rooms-transaction.*' -print | sort)
   [[ "${#transactions[@]}" -le 1 ]] || {
