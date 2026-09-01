@@ -67,11 +67,15 @@ final class RoomsStore: ObservableObject {
     @Published private(set) var fixtureLastAction = "none"
     @Published private(set) var fixtureActionPending = false
     @Published private(set) var fixtureMaxConcurrentActions = 0
+    /// The agent occupying each room, keyed by tmux session id. Rooms without a
+    /// coding agent are absent from the dictionary and keep their tmux name.
+    @Published private(set) var agentPresence: [String: AgentPresence]
     #if DEBUG
     @Published private(set) var fixtureIdentifier: String?
     #endif
 
     let isFixture: Bool
+    private let agentTracker: AgentPresenceTracker?
     private var handler: any RoomActionHandling
     private var focusability: [ClientKey: ClientFocusability]
     private var fixtureDefaultFocusability: ClientFocusability?
@@ -89,11 +93,15 @@ final class RoomsStore: ObservableObject {
         fixtureBlocksActions: Bool = false,
         fixtureIdentifier: String? = nil,
         isFixture: Bool,
+        agentPresence: [String: AgentPresence] = [:],
+        agentTracker: AgentPresenceTracker? = nil,
         handler: any RoomActionHandling
     ) {
         self.snapshot = snapshot
         self.phase = phase
         self.issue = issue
+        self.agentPresence = agentPresence
+        self.agentTracker = agentTracker
         self.focusability = focusability
         self.fixtureDefaultFocusability = fixtureDefaultFocusability
         self.fixtureBlocksActions = fixtureBlocksActions
@@ -105,9 +113,19 @@ final class RoomsStore: ObservableObject {
     }
 
     static func production() -> RoomsStore {
-        let store = RoomsStore(snapshot: .noServer, isFixture: false, handler: ProductionRoomActionHandler())
+        let store = RoomsStore(
+            snapshot: .noServer,
+            isFixture: false,
+            agentTracker: AgentPresenceTracker(),
+            handler: ProductionRoomActionHandler()
+        )
         Task { await store.perform(.refresh) }
         return store
+    }
+
+    /// The label a room has earned from the agent running inside it.
+    func presence(for room: SessionRoom) -> AgentPresence {
+        agentPresence[room.token.sessionID] ?? .absent
     }
 
     func focusability(for client: SessionRoom.Client) -> ClientFocusability {
@@ -207,6 +225,7 @@ final class RoomsStore: ObservableObject {
         snapshot = replacement.snapshot
         phase = replacement.phase
         issue = replacement.issue
+        agentPresence = replacement.agentPresence
         chooser = nil
         deleteConfirmation = nil
         handler = replacement.handler
@@ -244,7 +263,10 @@ final class RoomsStore: ObservableObject {
         guard generation == fixtureGeneration else { return }
         switch result {
         case let .succeeded(updated, focusableClients):
-            if let updated { snapshot = updated }
+            if let updated {
+                snapshot = updated
+                await refreshAgentPresence(for: updated.rooms, generation: generation)
+            }
             if let focusableClients {
                 focusability = Dictionary(uniqueKeysWithValues: focusableClients.map { ($0, .focusable) })
             }
@@ -262,6 +284,15 @@ final class RoomsStore: ObservableObject {
         }
         if isFixture { fixtureActiveActions -= 1 }
         phase = .idle
+    }
+
+    /// Relabels the rooms after a snapshot lands. The probe is advisory, so a
+    /// tracker that finds nothing simply leaves every room on its tmux name.
+    private func refreshAgentPresence(for rooms: [SessionRoom], generation: Int) async {
+        guard let agentTracker else { return }
+        guard await agentTracker.refresh(rooms: rooms) else { return }
+        guard generation == fixtureGeneration else { return }
+        agentPresence = agentTracker.presence
     }
 
     private func isRefresh(_ intent: RoomActionIntent) -> Bool {

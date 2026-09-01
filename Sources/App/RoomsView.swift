@@ -214,6 +214,31 @@ private struct RoomRow: View {
     private var roomID: String { room.uiIdentifier }
     private var activePane: SessionRoom.Pane? { room.panes.first(where: \.isActive) ?? room.panes.first }
     private var attached: Bool { room.clients.contains { !$0.isControlMode } }
+    private var presence: AgentPresence { store.presence(for: room) }
+
+    /// What the room is called on the card.
+    ///
+    /// A room running a named coding agent is known by that session's name: it
+    /// is what the person working in it chose to call the work. The tmux name is
+    /// a launcher-generated string such as
+    /// `omc-tmux-rooms-core-v1-20260901023710`, so it moves to the metadata line
+    /// rather than being lost.
+    private var title: String { presence.title ?? room.name }
+
+    /// The second line's middle field. It carries whichever of the two names the
+    /// title did not take, and falls back to the pane's command for a room with
+    /// no agent in it.
+    private var origin: String {
+        guard presence != .absent else {
+            let command = activePane?.currentCommand ?? ""
+            return command.isEmpty ? "unknown" : command
+        }
+        return room.name
+    }
+
+    private var originAccessibilityLabel: String {
+        presence == .absent ? "Active command \(origin)" : "Tmux session \(origin)"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -222,11 +247,11 @@ private struct RoomRow: View {
                     .fill(attached ? Palette.mint : Palette.muted)
                     .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
-                Text(room.name)
+                Text(title)
                     .font(.custom("Avenir Next Demi Bold", size: 15))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .accessibilityLabel(room.name)
+                    .accessibilityLabel(title)
                     .accessibilityIdentifier("room.\(roomID)")
                 Spacer(minLength: 6)
                 Text(statusText)
@@ -243,9 +268,11 @@ private struct RoomRow: View {
                         .accessibilityLabel("\(room.panes.count) panes")
                         .accessibilityIdentifier("room.\(roomID).pane-count")
                     Text("·").foregroundStyle(Palette.line)
-                    Text(pane.currentCommand.isEmpty ? "unknown" : pane.currentCommand)
-                        .accessibilityLabel("Active command \(pane.currentCommand.isEmpty ? "unknown" : pane.currentCommand)")
-                        .accessibilityIdentifier("room.\(roomID).active-command")
+                    Text(origin)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .accessibilityLabel(originAccessibilityLabel)
+                        .accessibilityIdentifier("room.\(roomID).origin")
                     Text("·").foregroundStyle(Palette.line)
                     Text(pane.currentPath.isEmpty ? "Path unavailable" : pane.currentPath)
                         .lineLimit(1)

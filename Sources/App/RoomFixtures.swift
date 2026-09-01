@@ -42,6 +42,8 @@ enum UIFixture: String, CaseIterable {
     case longUnicode = "v1-long-unicode"
     case generalError = "v1-general-error"
     case singleFlight = "v1-single-flight"
+    case agentNamed = "v1-agent-named"
+    case agentDetected = "v1-agent-detected"
 
     @MainActor
     func makeStore() -> RoomsStore {
@@ -55,6 +57,7 @@ enum UIFixture: String, CaseIterable {
             fixtureBlocksActions: definition.blocksActions,
             fixtureIdentifier: rawValue,
             isFixture: true,
+            agentPresence: definition.agentPresence,
             handler: FixtureRoomActionHandler(snapshot: definition.snapshot)
         )
     }
@@ -123,6 +126,18 @@ enum UIFixture: String, CaseIterable {
             return Definition(snapshot: Fixtures.snapshot([basic]), issue: .generalFixture)
         case .singleFlight:
             return Definition(snapshot: Fixtures.snapshot([Fixtures.room(name: "single-flight", id: "$9")]), blocksActions: true)
+        case .agentNamed:
+            let room = Fixtures.room(name: "omc-tmux-rooms-core-v1-20260901023710", id: "$10", command: "2.1.247")
+            return Definition(
+                snapshot: Fixtures.snapshot([room]),
+                agentPresence: ["$10": .named(.claude, "9.1 배포 경계")]
+            )
+        case .agentDetected:
+            let room = Fixtures.room(name: "omc-projects-detached-20260826230948", id: "$11", command: "codex")
+            return Definition(
+                snapshot: Fixtures.snapshot([room]),
+                agentPresence: ["$11": .detected(.codex)]
+            )
         }
     }
 
@@ -132,6 +147,7 @@ enum UIFixture: String, CaseIterable {
         var issue: AppIssue?
         var focusability: [ClientKey: ClientFocusability] = [:]
         var blocksActions = false
+        var agentPresence: [String: AgentPresence] = [:]
     }
 }
 
@@ -148,7 +164,7 @@ private enum Fixtures {
         RoomSnapshot(server: server, rooms: rooms)
     }
 
-    static func room(name: String, id: String, clients: [SessionRoom.Client] = []) -> SessionRoom {
+    static func room(name: String, id: String, clients: [SessionRoom.Client] = [], command: String = "zsh") -> SessionRoom {
         SessionRoom(
             token: SessionToken(server: server, sessionID: id, createdAtUnixSeconds: 1_700_000_100),
             name: name,
@@ -159,7 +175,7 @@ private enum Fixtures {
                 panePID: 101,
                 currentPath: "/Users/fixture/Projects/tmux-rooms",
                 title: "editor",
-                currentCommand: "zsh",
+                currentCommand: command,
                 isActive: true,
                 isDead: false
             )],

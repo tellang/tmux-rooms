@@ -106,7 +106,7 @@ final class TmuxRoomsUITests: XCTestCase {
         launch("v1-one-focusable")
         let id = roomID(3)
         let paneCount = textElement("room.\(id).pane-count")
-        let command = textElement("room.\(id).active-command")
+        let command = textElement("room.\(id).origin")
         let path = textElement("room.\(id).active-path")
         let openID = "room.\(id).open"
         let previewID = "room.\(id).preview"
@@ -124,6 +124,31 @@ final class TmuxRoomsUITests: XCTestCase {
         fixtureWindow.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitForValue("1", at: "fixture.action.count"))
         XCTAssertTrue(waitForValueContaining("route=sole", at: "fixture.action.last"))
+    }
+
+    func testAgentSessionNameReplacesTheTmuxNameOnTheCard() {
+        launch("v1-agent-named")
+        let id = roomID(10)
+        let title = textElement("room.\(id)")
+        let origin = textElement("room.\(id).origin")
+
+        XCTAssertTrue(waitForExistence(title))
+        XCTAssertTrue(text(of: title).contains("9.1 배포 경계"))
+        XCTAssertTrue(waitForExistence(origin))
+        XCTAssertTrue(text(of: origin).contains("omc-tmux-rooms-core-v1-20260901023710"))
+        XCTAssertFalse(text(of: origin).contains("2.1.247"))
+        XCTAssertTrue(waitUntilReady(button("room.\(id).open")))
+        XCTAssertEqual(button("room.\(id).open").label, "Open existing room omc-tmux-rooms-core-v1-20260901023710")
+    }
+
+    func testUnnamedAgentFallsBackToItsProductName() {
+        launch("v1-agent-detected")
+        let id = roomID(11)
+        let title = textElement("room.\(id)")
+
+        XCTAssertTrue(waitForExistence(title))
+        XCTAssertTrue(text(of: title).contains("Codex"))
+        XCTAssertTrue(text(of: textElement("room.\(id).origin")).contains("omc-projects-detached-20260826230948"))
     }
 
     func testRecoveryAndTimeoutRetryPolicy() {

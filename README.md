@@ -16,6 +16,25 @@ Room actions:
 - **Recovery** exposes exact nonce-scoped promotion or cleanup for unresolved
   app-owned clients.
 
+## Room names
+
+A room that holds a coding agent is titled by that agent's own session name
+rather than by its tmux name, which is usually a launcher-generated string such
+as `omc-tmux-rooms-core-v1-20260901023710`. The tmux name moves to the metadata
+line so nothing is lost.
+
+The name comes from the live registry Claude Code keeps at
+`~/.claude/sessions/<pid>.json`, which records what `/rename` sets along with the
+`session:@window.%pane` coordinate of the pane holding it. A record is believed
+only when both its pane and its pid match a live pane in that room, so a
+registry file outliving its process cannot name a room. A session nobody renamed
+falls back to the conversation title in its transcript.
+
+An agent that publishes no usable name is labelled by product alone, `Claude` or
+`Codex`, and a room with no agent in it keeps its tmux name and pane command
+exactly as before. Codex publishes no pane coordinate, so it is identified by
+process and never by name.
+
 ## Requirements
 
 - macOS 15 or newer
