@@ -11,3 +11,12 @@ TmuxRooms.xcodeproj/project.xcworkspace/xcuserdata/
 TmuxRooms.xcodeproj/xcuserdata/
 .omx/
 .worktrees/
+
+# Local agent tooling. Runtime state and machine-local registrations, except
+# the project-scoped skills these tools are meant to keep in the repo.
+.claude/*
+!.claude/skills/
+.omc/*
+!.omc/skills/
+.triflux/
+.mcp.json
