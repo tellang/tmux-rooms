@@ -536,7 +536,7 @@ private struct ClientChooserSheet: View {
         }
         .padding(22)
         .frame(width: 410)
-        .background(Palette.canvas)
+        .sheetChrome()
     }
 }
 
@@ -576,7 +576,19 @@ private struct DeleteConfirmationSheet: View {
         }
         .padding(22)
         .frame(width: 400)
-        .background(Palette.canvas)
+        .sheetChrome()
+    }
+}
+
+private extension View {
+    /// The card a sheet sits on. Both sheets float over a dimmed room list, and
+    /// a square-cornered panel over that backdrop reads as the window itself
+    /// having lost its corners. Same radius as a room card, one line of border
+    /// so the edge survives on the dark canvas, and a shadow to put it above.
+    func sheetChrome() -> some View {
+        background(Palette.canvas, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Palette.line))
+            .shadow(color: .black.opacity(0.45), radius: 24, y: 8)
     }
 }
 
