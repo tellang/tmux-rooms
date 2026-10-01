@@ -42,6 +42,29 @@ targets:
           CODE_SIGN_IDENTITY: Tmux Rooms Local Development
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 
+  # The target name differs from the product name on purpose: `tmuxrooms` and the
+  # app's `TmuxRooms` differ only by case, and the default macOS filesystem treats
+  # them as one file, which made one scheme overwrite the other.
+  tmuxrooms-cli:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/CLI
+    dependencies:
+      - target: TmuxRoomsCore
+    settings:
+      base:
+        PRODUCT_NAME: tmuxrooms
+        EXECUTABLE_NAME: tmuxrooms
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+
   TmuxRooms:
     type: application
     platform: macOS
@@ -102,7 +125,13 @@ targets:
       - Sources/App/RoomActions.swift
       - Sources/App/RoomsStore.swift
       - Sources/App/RefreshCadence.swift
+      - Sources/CLI/RoomQuery.swift
+      - Sources/CLI/RoomFormat.swift
+      - Sources/CLI/ChooserInput.swift
+      - Sources/CLI/HelpText.swift
+      - Sources/CLI/AgentStyle.swift
       - Tests/App
+      - Tests/CLI
       - Tests/Core
       - Tests/Terminal
       - Tests/Integration
@@ -143,6 +172,10 @@ schemes:
       targets:
         - TmuxRoomsTests
         - TmuxRoomsUITests
+  tmuxrooms-cli:
+    build:
+      targets:
+        tmuxrooms-cli: all
   TmuxRoomsUnitTests:
     build:
       targets:
