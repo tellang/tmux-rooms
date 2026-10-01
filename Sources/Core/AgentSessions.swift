@@ -4,12 +4,15 @@ import Foundation
 public enum AgentKind: String, Sendable, Hashable, CaseIterable {
     case claude
     case codex
+    /// Antigravity's command line, which installs as `agy`.
+    case agy
 
     /// The label shown when the agent is present but unnamed.
     public var displayName: String {
         switch self {
         case .claude: "Claude"
         case .codex: "Codex"
+        case .agy: "Antigravity"
         }
     }
 

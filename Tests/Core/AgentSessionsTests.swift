@@ -142,6 +142,29 @@ func processTableRecognisesCodex() {
     #expect(table.agentKind(inTreeOf: 600) == nil)
 }
 
+@Test("the process table recognises agy and does not mistake similar names for it")
+func processTableRecognisesAgy() {
+    let table = ProcessTable(psOutput: """
+     700 1 zsh
+     701 700 agy
+     800 1 zsh
+     801 800 /Users/fixture/.local/bin/agy
+     900 1 zsh
+     901 900 agy-helper
+    """)
+    #expect(table.agentKind(inTreeOf: 700) == .agy)
+    #expect(table.agentKind(inTreeOf: 800) == .agy)
+    #expect(table.agentKind(inTreeOf: 900) == nil)
+}
+
+@Test("agy is detected by process alone and labelled Antigravity")
+func resolverDetectsAgy() {
+    let subject = room(panes: [pane("%8", pid: 700, command: "agy")])
+    let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "700 4382 agy"))
+    #expect(presence == .detected(.agy))
+    #expect(presence.title == "Antigravity")
+}
+
 @Test("the process table stops before an agent's own deep children")
 func processTableBoundsDepth() {
     var rows = ["100 1 zsh"]
