@@ -16,6 +16,7 @@
 		103FAF219559303A4475D955 /* AgentPresenceTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B6D140FB9D6831E86B0002 /* AgentPresenceTrackerTests.swift */; };
 		127ECE9E8A46BB54B7E24BA5 /* BootstrapPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A4C32246841CEBB210DEFF /* BootstrapPerformanceTests.swift */; };
 		130B988DE8777F9808379443 /* RefreshCadence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE5667D17331FDBB59477D4 /* RefreshCadence.swift */; };
+		169A88D6C2C5E11C22E674F9 /* AgentActivityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EAFC5C0F58842A0FF60FCFC /* AgentActivityState.swift */; };
 		17579737CE258A6CB0FDEF18 /* DeleteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C1ABD4B243B31AF36BFC58D /* DeleteTests.swift */; };
 		17A847F02C9735496B417D3A /* TmuxParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22743D854CFFD640B212B815 /* TmuxParsing.swift */; };
 		1A41421A4479FD84A8868768 /* ITermPythonTitleTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE95CA0A7DE60D8217271997 /* ITermPythonTitleTransport.swift */; };
@@ -26,6 +27,7 @@
 		27A71F7B659DD315E40C30EF /* libTmuxRoomsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */; };
 		28B3C97414405DC059C72772 /* ChooserInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DCC868EFE2D5174FDDFC19B /* ChooserInput.swift */; };
 		2934B6E8F5260BDAEB6F47B5 /* AgentSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64C551C43ADD362890DEF95E /* AgentSessions.swift */; };
+		2AA67691D3F252CB8777DFC6 /* CodexSessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C3B5A29742CCD88BF99A352 /* CodexSessionsTests.swift */; };
 		2BB28104096978AF8780DC8D /* AgentSessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEC5EF029B47A41A05A405D /* AgentSessionsTests.swift */; };
 		36FE7153827461A40A73486A /* ITermPythonTitleTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2198DEBEB9BFA44034E243B8 /* ITermPythonTitleTransportTests.swift */; };
 		380930A525E50ED69A8B0CA1 /* TmuxCommandRunning.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF47A9D5A480B05DB1ADC024 /* TmuxCommandRunning.swift */; };
@@ -63,6 +65,8 @@
 		B34D8CBDC5BE3369A2F065BC /* HelpText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D95667EA27933F0BB8BBB80 /* HelpText.swift */; };
 		B4694914C259FC4B19E65D12 /* libTmuxRoomsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F41395579C228E50D22609C /* libTmuxRoomsCore.a */; };
 		B4CC48C3015AB01C5C2315D9 /* AgentStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80AD9151868499071CA2B77A /* AgentStyleTests.swift */; };
+		B6424D8E2B37287A2A8D2E12 /* AgentPresenceProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1C0EA6E39D78541F221A48 /* AgentPresenceProbeTests.swift */; };
+		B7371174D753945F33995D03 /* CodexSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99545917D1AD45F597B42CF6 /* CodexSessions.swift */; };
 		B8A4EAE1394AB44F1901554E /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A112055D3824AFBF2E33A47 /* main.swift */; };
 		BF454645868AF2FD2AFD5E53 /* PublicModelAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B514BAC90FE91285AD9BB1DB /* PublicModelAPITests.swift */; };
 		C1420C57C134B593476D09C4 /* TmuxRoomsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */; };
@@ -149,7 +153,9 @@
 		22743D854CFFD640B212B815 /* TmuxParsing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxParsing.swift; sourceTree = "<group>"; };
 		24601962A482F968D4972240 /* TmuxRooms.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TmuxRooms.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2C7C5B029A6A7BF144EAA21A /* TmuxParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxParsingTests.swift; sourceTree = "<group>"; };
+		2EAFC5C0F58842A0FF60FCFC /* AgentActivityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityState.swift; sourceTree = "<group>"; };
 		361708D3FA806C66E3F6A042 /* TmuxRoomsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsApp.swift; sourceTree = "<group>"; };
+		3A1C0EA6E39D78541F221A48 /* AgentPresenceProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPresenceProbeTests.swift; sourceTree = "<group>"; };
 		3C1ABD4B243B31AF36BFC58D /* DeleteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteTests.swift; sourceTree = "<group>"; };
 		3D95667EA27933F0BB8BBB80 /* HelpText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpText.swift; sourceTree = "<group>"; };
 		3F56C0B138B856CAA6B48A59 /* ManagedSupervisorClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedSupervisorClient.swift; sourceTree = "<group>"; };
@@ -176,6 +182,8 @@
 		8DC7BBAFAFC9B1680D06975B /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		926CF95BA813D430BAF38964 /* ManagedTerminalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedTerminalModels.swift; sourceTree = "<group>"; };
 		96AB9DF44F7F67FAB2736588 /* ITermManagedAutomation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITermManagedAutomation.swift; sourceTree = "<group>"; };
+		99545917D1AD45F597B42CF6 /* CodexSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSessions.swift; sourceTree = "<group>"; };
+		9C3B5A29742CCD88BF99A352 /* CodexSessionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSessionsTests.swift; sourceTree = "<group>"; };
 		A0EB950F263CF3CB77956096 /* ManagedClientJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedClientJournal.swift; sourceTree = "<group>"; };
 		A4A4C32246841CEBB210DEFF /* BootstrapPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapPerformanceTests.swift; sourceTree = "<group>"; };
 		A65E640A064E1A5716ACC378 /* AgentStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStyle.swift; sourceTree = "<group>"; };
@@ -352,9 +360,11 @@
 		80EFE3D15C1994330EA126F8 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				3A1C0EA6E39D78541F221A48 /* AgentPresenceProbeTests.swift */,
 				D6B6D140FB9D6831E86B0002 /* AgentPresenceTrackerTests.swift */,
 				ADEC5EF029B47A41A05A405D /* AgentSessionsTests.swift */,
 				896E6C3367F410B8BF152135 /* BootstrapTests.swift */,
+				9C3B5A29742CCD88BF99A352 /* CodexSessionsTests.swift */,
 				B514BAC90FE91285AD9BB1DB /* PublicModelAPITests.swift */,
 				BB81A5E1A67790FA727BB129 /* TmuxControllerActionTests.swift */,
 				1F04E0A9AF88A8CBCAF1CA3E /* TmuxControllerTests.swift */,
@@ -402,11 +412,13 @@
 		CB307E08BEBFE1834B3FA2A7 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				2EAFC5C0F58842A0FF60FCFC /* AgentActivityState.swift */,
 				87CE3F9C1BAF0228B5C32084 /* AgentPresenceProbe.swift */,
 				220B73B11BA5E06C86B3969C /* AgentPresenceTracker.swift */,
 				64C551C43ADD362890DEF95E /* AgentSessions.swift */,
 				A6B66239C51A482B06F35A9D /* AppLog.swift */,
 				4D60E687E5F5644FD6CB52FE /* ClaudeConversationTitles.swift */,
+				99545917D1AD45F597B42CF6 /* CodexSessions.swift */,
 				BF47A9D5A480B05DB1ADC024 /* TmuxCommandRunning.swift */,
 				DD75F63D25867D61DB2356F3 /* TmuxController.swift */,
 				161E2E8330997AF3FD89C884 /* TmuxDeleteExecutor.swift */,
@@ -691,12 +703,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				169A88D6C2C5E11C22E674F9 /* AgentActivityState.swift in Sources */,
 				22D25942563710AFAF8A816B /* AgentPresenceProbe.swift in Sources */,
 				8CA1856504F2C272060B32B5 /* AgentPresenceTracker.swift in Sources */,
 				2934B6E8F5260BDAEB6F47B5 /* AgentSessions.swift in Sources */,
 				8EB6CF408C3DC086904658C0 /* AppLog.swift in Sources */,
 				5F8151DDCB95574D035C45B8 /* AppleScriptRunner.swift in Sources */,
 				98305111A3F776E731D7F6C7 /* ClaudeConversationTitles.swift in Sources */,
+				B7371174D753945F33995D03 /* CodexSessions.swift in Sources */,
 				0448083A986FDAA5A364FAC3 /* ITermAutomationSmoke.swift in Sources */,
 				0634EBE2AE94B7DC0DBD5D1A /* ITermManagedAutomation.swift in Sources */,
 				1A41421A4479FD84A8868768 /* ITermPythonTitleTransport.swift in Sources */,
@@ -724,6 +738,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B6424D8E2B37287A2A8D2E12 /* AgentPresenceProbeTests.swift in Sources */,
 				103FAF219559303A4475D955 /* AgentPresenceTrackerTests.swift in Sources */,
 				2BB28104096978AF8780DC8D /* AgentSessionsTests.swift in Sources */,
 				7F1185D9F0A36B31F99ACF37 /* AgentStyle.swift in Sources */,
@@ -732,6 +747,7 @@
 				4641DD2EE3411406F6FE8D04 /* BootstrapTests.swift in Sources */,
 				28B3C97414405DC059C72772 /* ChooserInput.swift in Sources */,
 				3903789BF57520E5C4A0DA2C /* ChooserTests.swift in Sources */,
+				2AA67691D3F252CB8777DFC6 /* CodexSessionsTests.swift in Sources */,
 				17579737CE258A6CB0FDEF18 /* DeleteTests.swift in Sources */,
 				3F8052EEBB344261B6C11C6F /* HelpText.swift in Sources */,
 				1E6D95D5851C4247C42355EB /* ITermAutomationSmokeTests.swift in Sources */,

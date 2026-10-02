@@ -55,12 +55,13 @@ func describe(_ failure: TmuxFailure) -> String {
     }
 }
 
-func loadRooms() async -> [CLIRoom] {
+func loadRooms(capturePaneState: Bool) async -> [CLIRoom] {
     do {
         let socket = try DefaultTmuxEndpointResolver.resolve()
         let snapshot = try await TmuxSnapshotLoader().load(socketURL: socket)
-        let presence = await AgentPresenceProbe().presence(for: snapshot.rooms)
-        return RoomQuery.rooms(from: snapshot, presence: presence)
+        let agents = await AgentPresenceProbe(socketPath: socket.path, allowLsofFallback: true)
+            .inspect(for: snapshot.rooms, capturePaneState: capturePaneState)
+        return RoomQuery.rooms(from: snapshot, presence: agents.presence, panes: agents.panes)
     } catch let failure as TmuxFailure {
         fail(describe(failure), code: 3)
     } catch {
@@ -125,7 +126,11 @@ guard let options = parseOptions(arguments) else {
 
 let directory = canonicalCurrentDirectory()
 let scope = options.here ? directory : nil
-let rooms = RoomQuery.filter(await loadRooms(), directory: scope, text: options.text)
+let rooms = RoomQuery.filter(
+    await loadRooms(capturePaneState: options.json && (command == "ls" || command == "list")),
+    directory: scope,
+    text: options.text
+)
 
 switch command {
 case "ls", "list":

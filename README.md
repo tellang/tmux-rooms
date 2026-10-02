@@ -23,18 +23,23 @@ rather than by its tmux name, which is usually a launcher-generated string such
 as `omc-tmux-rooms-core-v1-20260901023710`. The tmux name moves to the metadata
 line so nothing is lost.
 
-The name comes from the live registry Claude Code keeps at
+Claude's name comes from the live registry Claude Code keeps at
 `~/.claude/sessions/<pid>.json`, which records what `/rename` sets along with the
-`session:@window.%pane` coordinate of the pane holding it. A record is believed
-only when both its pane and its pid match a live pane in that room, so a
-registry file outliving its process cannot name a room. A session nobody renamed
-falls back to the conversation title in its transcript.
+`session:@window.%pane` coordinate of the pane holding it. A session nobody
+renamed falls back to the conversation title in its transcript. Codex names
+come from `$XDG_STATE_HOME/triflux/codex-sessions/<pid>.json` first
+(`XDG_STATE_HOME` defaults to `~/.local/state`), then `.omx/state/session.json`
+in the pane's directory or its ancestors through the home directory, then a
+Codex rollout file found with `lsof` by the CLI. The rollout fallback is not
+used by the menu-bar app. Thread names come from `$CODEX_HOME/session_index.jsonl`
+(`CODEX_HOME` defaults to `~/.codex`), with the last rename winning. A
+record is believed only when its pane matches a live pane and its pid is that
+pane's process or a descendant, so a file outliving its process cannot name a
+room.
 
 An agent that publishes no usable name is labelled by product alone, `Claude`,
 `Codex`, or `Antigravity` (its `agy` command), and a room with no agent in it
-keeps its tmux name and pane command exactly as before. Only Claude Code keeps a
-session registry, so Codex and Antigravity are identified by process and never
-by name.
+keeps its tmux name and pane command exactly as before.
 
 ## Command line
 
@@ -49,6 +54,15 @@ tmr -r billing        # read-only, rooms matching "billing"
 tmr ls --here --json  # print instead of attach; --json for scripts
 tmr -help             # the full help
 ```
+
+`tmr ls --json` keeps the room fields and adds a `panes` array with one entry
+per live pane. Each entry has `paneId`, a `target` such as
+`work:0.1` for `tmux -t` or `tfx-live ask --session`, `active`, `path`,
+`agent`, `pid`, `sessionId`, `name`, and `state`. Unknown agent, session ID, and
+name values are JSON `null`; an unknown agent's `pid` is the pane pid.
+`state` is `busy`, `idle`, or `unknown`. Claude state comes from its registry
+status; Codex and `agy` state comes from the pane's visible screen, captured
+only for JSON listing. State is never inferred from a process name.
 
 In the chooser, Up and Down (or `k` and `j`) move the highlight and wrap around,
 Home and End jump to the ends, and Enter attaches. A number key attaches to that

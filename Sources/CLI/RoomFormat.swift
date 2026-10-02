@@ -145,6 +145,52 @@ enum RoomFormat {
         let interactiveClients: Int
         let readOnlyClients: Int
         let lastActivity: Int64
+        let panes: [JSONPane]
+    }
+
+    private struct JSONPane: Encodable {
+        let paneId: String
+        let target: String
+        let active: Bool
+        let path: String
+        let agent: String?
+        let pid: Int32
+        let sessionId: String?
+        let name: String?
+        let state: String
+
+        init(_ pane: CLIPane) {
+            paneId = pane.paneId
+            target = pane.target
+            active = pane.active
+            path = pane.path
+            agent = pane.agent?.rawValue
+            pid = pane.pid
+            sessionId = pane.sessionId
+            name = pane.name
+            state = pane.state.rawValue
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case paneId, target, active, path, agent, pid, sessionId, name, state
+        }
+
+        /// The pane schema keeps nullable keys visible to JSON consumers.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(paneId, forKey: .paneId)
+            try container.encode(target, forKey: .target)
+            try container.encode(active, forKey: .active)
+            try container.encode(path, forKey: .path)
+            if let agent { try container.encode(agent, forKey: .agent) }
+            else { try container.encodeNil(forKey: .agent) }
+            try container.encode(pid, forKey: .pid)
+            if let sessionId { try container.encode(sessionId, forKey: .sessionId) }
+            else { try container.encodeNil(forKey: .sessionId) }
+            if let name { try container.encode(name, forKey: .name) }
+            else { try container.encodeNil(forKey: .name) }
+            try container.encode(state, forKey: .state)
+        }
     }
 
     static func json(_ rooms: [CLIRoom]) throws -> String {
@@ -159,7 +205,8 @@ enum RoomFormat {
                 paths: room.paths,
                 interactiveClients: room.interactiveClients,
                 readOnlyClients: room.readOnlyClients,
-                lastActivity: room.lastActivityAtUnixSeconds
+                lastActivity: room.lastActivityAtUnixSeconds,
+                panes: room.panes.map(JSONPane.init)
             )
         }
         return String(decoding: try encoder.encode(payload), as: UTF8.self)

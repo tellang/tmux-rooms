@@ -363,3 +363,14 @@ func conversationTitleRefusesPathTraversal() {
     #expect(ClaudeConversationTitles.title(forSessionID: "../../etc/passwd", projectsDirectory: URL(fileURLWithPath: NSTemporaryDirectory())) == nil)
     #expect(ClaudeConversationTitles.title(forSessionID: "", projectsDirectory: URL(fileURLWithPath: NSTemporaryDirectory())) == nil)
 }
+
+@Test("a Codex descendant record names its pane but a mismatched pane never does")
+func resolverNamesCodexDescendant() {
+    let subject = room(panes: [pane("%228", pid: 100)])
+    let table = ProcessTable(psOutput: "100 1 node\n101 100 node\n102 101 codex")
+    let record = AgentSessionRecord(kind: .codex, pid: 102, sessionID: "thread", name: "리메이크", nameIsDerived: false, paneID: "%228", tmuxSessionName: nil, currentPath: "")
+    #expect(AgentPresenceResolver.presence(for: subject, records: [record], table: table) == .named(.codex, "리메이크"))
+    let other = room(panes: [pane("%229", pid: 100)])
+    #expect(AgentPresenceResolver.presence(for: other, records: [record], table: table) == .detected(.codex))
+    #expect(AgentPresenceResolver.presence(for: subject, records: [record], table: nil) == .absent)
+}

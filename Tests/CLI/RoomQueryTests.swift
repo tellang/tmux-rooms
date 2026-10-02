@@ -28,14 +28,18 @@ private func room(
         name: name,
         lastActivityAtUnixSeconds: activity,
         panes: paths.enumerated().map { offset, path in
-            SessionRoom.Pane(windowID: "@\(offset)", paneID: "%\(offset)", panePID: Int32(200 + offset), currentPath: path, title: "pane", currentCommand: "node", isActive: offset == 0, isDead: false)
+            SessionRoom.Pane(windowID: "@\(offset)", paneID: "%\(offset)", panePID: Int32(200 + offset), currentPath: path, title: "pane", currentCommand: "node", isActive: offset == 0, isDead: false, windowIndex: 2, paneIndex: offset + 3)
         },
         clients: clients
     )
 }
 
-private func rooms(_ list: [SessionRoom], presence: [String: AgentPresence] = [:]) -> [CLIRoom] {
-    RoomQuery.rooms(from: RoomSnapshot(server: server, rooms: list), presence: presence)
+private func rooms(
+    _ list: [SessionRoom],
+    presence: [String: AgentPresence] = [:],
+    panes: [String: PaneAgentInfo] = [:]
+) -> [CLIRoom] {
+    RoomQuery.rooms(from: RoomSnapshot(server: server, rooms: list), presence: presence, panes: panes)
 }
 
 @Suite("CLI room query")
@@ -203,5 +207,42 @@ struct RoomQueryTests {
         #expect(decoded[0]["title"] as? String == "작업")
         #expect(decoded[0]["agent"] as? String == "codex")
         #expect(decoded[0]["paths"] as? [String] == ["/Users/fixture/Projects/app"])
+    }
+
+    @Test func jsonCarriesLivePaneTargetsAndExplicitUnknownFields() throws {
+        let source = room("$1", name: "work", paths: ["/p/one", "/p/two"])
+        let named = PaneAgentInfo(
+            kind: .codex, pid: 73965, sessionID: "thread-1", name: "작업", state: .busy
+        )
+        let all = rooms([source], presence: ["$1": .named(.codex, "작업")], panes: ["%0": named])
+        let text = try RoomFormat.json(all)
+        let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        let paneJSON = try #require(decoded[0]["panes"] as? [[String: Any]])
+        #expect(paneJSON.count == 2)
+        #expect(paneJSON[0]["paneId"] as? String == "%0")
+        #expect(paneJSON[0]["target"] as? String == "work:2.3")
+        #expect(paneJSON[0]["active"] as? Bool == true)
+        #expect(paneJSON[0]["path"] as? String == "/p/one")
+        #expect(paneJSON[0]["agent"] as? String == "codex")
+        #expect(paneJSON[0]["pid"] as? Int == 73965)
+        #expect(paneJSON[0]["sessionId"] as? String == "thread-1")
+        #expect(paneJSON[0]["name"] as? String == "작업")
+        #expect(paneJSON[0]["state"] as? String == "busy")
+        #expect(paneJSON[1]["target"] as? String == "work:2.4")
+        #expect(paneJSON[1]["agent"] is NSNull)
+        #expect(paneJSON[1]["pid"] as? Int == 201)
+        #expect(paneJSON[1]["sessionId"] is NSNull)
+        #expect(paneJSON[1]["name"] is NSNull)
+        #expect(paneJSON[1]["state"] as? String == "unknown")
+    }
+
+    @Test func deadPanesAreNotIncludedInJSON() throws {
+        let live = SessionRoom.Pane(windowID: "@1", paneID: "%1", panePID: 101, currentPath: "/live", title: "", currentCommand: "zsh", isActive: true, isDead: false)
+        let dead = SessionRoom.Pane(windowID: "@1", paneID: "%2", panePID: 102, currentPath: "/dead", title: "", currentCommand: "zsh", isActive: false, isDead: true)
+        let source = SessionRoom(token: SessionToken(server: server, sessionID: "$1", createdAtUnixSeconds: 1), name: "work", lastActivityAtUnixSeconds: 2, panes: [live, dead], clients: [])
+        let text = try RoomFormat.json(rooms([source]))
+        let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        let paneJSON = try #require(decoded[0]["panes"] as? [[String: Any]])
+        #expect(paneJSON.map { $0["paneId"] as? String } == ["%1"])
     }
 }
