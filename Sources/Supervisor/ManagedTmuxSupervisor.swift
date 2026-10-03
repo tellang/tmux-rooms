@@ -52,6 +52,7 @@ public enum ManagedSupervisorFailure: Error, Sendable, Equatable {
     case launchFailed(String)
     case childTerminationTimedOut
     case malformedRequest
+    case untrustedExecutable
 }
 
 public struct ManagedSupervisorIO: @unchecked Sendable {
@@ -69,6 +70,9 @@ public enum ManagedSupervisorCLI {
 }
 
 public final class ManagedTmuxSupervisor: @unchecked Sendable {
+    /// The only tmux binaries the helper runs, whatever its configuration file says.
+    public static let allowedTmuxExecutables: Set<String> = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"]
+
     private let journal: ManagedClientJournal
     private let pollInterval: Duration
     private let runner: any TmuxCommandRunning
@@ -94,8 +98,8 @@ public final class ManagedTmuxSupervisor: @unchecked Sendable {
     }
 
     public func processRequests() async throws {
-        try FileManager.default.createDirectory(at: journal.requestsDirectory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: journal.responsesDirectory, withIntermediateDirectories: true)
+        try journal.createPrivateDirectory(journal.requestsDirectory)
+        try journal.createPrivateDirectory(journal.responsesDirectory)
         let files = try FileManager.default.contentsOfDirectory(at: journal.requestsDirectory, includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         for file in files {
@@ -164,6 +168,7 @@ public final class ManagedTmuxSupervisor: @unchecked Sendable {
 
     private func validate(_ configuration: ManagedSupervisorConfiguration) async throws {
         guard ManagedNonce.isValid(configuration.nonce) else { throw ManagedSupervisorFailure.invalidNonce }
+        guard Self.allowedTmuxExecutables.contains(configuration.tmuxExecutablePath) else { throw ManagedSupervisorFailure.untrustedExecutable }
         let token = configuration.destination
         var info = stat()
         guard lstat(token.server.canonicalSocketPath, &info) == 0,

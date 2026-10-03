@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public struct ManagedClientJournal: Sendable {
@@ -19,7 +20,7 @@ public struct ManagedClientJournal: Sendable {
 
     public func write(_ record: ManagedClientRecord) throws {
         guard ManagedNonce.isValid(record.nonce) else { throw ManagedTerminalError.invalidNonce }
-        try FileManager.default.createDirectory(at: recordsDirectory, withIntermediateDirectories: true)
+        try createPrivateDirectory(recordsDirectory)
         let data = try encoder.encode(record)
         try atomicWrite(data, to: recordURL(record.nonce))
     }
@@ -51,13 +52,18 @@ public struct ManagedClientJournal: Sendable {
 
     public func writeConfiguration(_ configuration: ManagedSupervisorConfiguration) throws {
         guard ManagedNonce.isValid(configuration.nonce) else { throw ManagedTerminalError.invalidNonce }
-        try FileManager.default.createDirectory(at: configurationsDirectory, withIntermediateDirectories: true)
+        try createPrivateDirectory(configurationsDirectory)
         try atomicWrite(try encoder.encode(configuration), to: configurationURL(configuration.nonce))
     }
 
+    /// The helper runs what this file names, so it must be a regular file this
+    /// user owns that nobody else can read or write, and never a symlink.
     public func readConfiguration(nonce: String) throws -> ManagedSupervisorConfiguration {
         guard ManagedNonce.isValid(nonce) else { throw ManagedTerminalError.invalidNonce }
-        return try decoder.decode(ManagedSupervisorConfiguration.self, from: Data(contentsOf: configurationURL(nonce)))
+        guard let data = BoundedFileReader.read(configurationURL(nonce), limit: BoundedFileReader.jsonStateLimit, ownerOnly: true) else {
+            throw ManagedTerminalError.journal("supervisor configuration is not a private regular file")
+        }
+        return try decoder.decode(ManagedSupervisorConfiguration.self, from: data)
     }
 
     public func readHandshake(nonce: String) throws -> ManagedSupervisorHandshake? {
@@ -95,9 +101,35 @@ public struct ManagedClientJournal: Sendable {
     public func handshakeURL(_ nonce: String) -> URL { root.appending(path: "handshake-\(nonce).json") }
 
     public func atomicWrite<T: Encodable>(_ value: T, to url: URL) throws { try atomicWrite(try encoder.encode(value), to: url) }
+
+    /// The temporary file is created 0600, so the renamed file is never
+    /// readable by anyone else, not even for an instant.
     private func atomicWrite(_ data: Data, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
+        let directory = url.deletingLastPathComponent()
+        try createPrivateDirectory(directory)
+        let temporary = directory.appending(path: ".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+        let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw ManagedTerminalError.journal("cannot create \(temporary.path): \(String(cString: strerror(errno)))") }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        do {
+            try handle.write(contentsOf: data)
+            try handle.close()
+        } catch {
+            unlink(temporary.path)
+            throw error
+        }
+        guard rename(temporary.path, url.path) == 0 else {
+            let reason = String(cString: strerror(errno))
+            unlink(temporary.path)
+            throw ManagedTerminalError.journal("cannot replace \(url.path): \(reason)")
+        }
+    }
+
+    /// Journal directories are 0700, including ones an older build created
+    /// with the default mode.
+    public func createPrivateDirectory(_ url: URL) throws {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        guard chmod(url.path, 0o700) == 0 else { throw ManagedTerminalError.journal("cannot restrict \(url.path): \(String(cString: strerror(errno)))") }
     }
 }
 

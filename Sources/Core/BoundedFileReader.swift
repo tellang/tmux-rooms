@@ -16,6 +16,7 @@ public enum BoundedFileReader {
     struct OpenFile {
         let handle: FileHandle
         let size: UInt64
+        let info: stat
     }
 
     /// Opens `url` for reading, or returns `nil` for anything but a regular file.
@@ -27,13 +28,19 @@ public enum BoundedFileReader {
             close(descriptor)
             return nil
         }
-        return OpenFile(handle: FileHandle(fileDescriptor: descriptor, closeOnDealloc: true), size: UInt64(info.st_size))
+        return OpenFile(handle: FileHandle(fileDescriptor: descriptor, closeOnDealloc: true), size: UInt64(info.st_size), info: info)
     }
 
     /// The whole file, or `nil` when it is not a regular file or exceeds `limit`.
-    public static func read(_ url: URL, limit: Int) -> Data? {
+    ///
+    /// With `ownerOnly`, the file must also belong to this user and grant no
+    /// group or other permission bits.
+    public static func read(_ url: URL, limit: Int, ownerOnly: Bool = false) -> Data? {
         guard let file = open(url), file.size <= UInt64(limit) else { return nil }
         defer { try? file.handle.close() }
+        if ownerOnly {
+            guard file.info.st_uid == getuid(), file.info.st_mode & 0o077 == 0 else { return nil }
+        }
         // The size can grow between fstat and read, so the cap is enforced again.
         guard let data = try? file.handle.read(upToCount: limit + 1) else { return file.size == 0 ? Data() : nil }
         return data.count <= limit ? data : nil
