@@ -65,8 +65,9 @@ Privacy & Security (Automation, and Accessibility if asked). Grant it and run
 the tests again.
 
 To look at the app with made-up rooms yourself, run a Debug build with
-`TMUX_ROOMS_UI_FIXTURE=readme-demo`. It opens a window with five sample rooms
-and never reads your tmux server.
+`TMUX_ROOMS_UI_FIXTURE=readme-demo`. It puts the menu-bar icon up with five
+sample rooms, which is how `docs/images/tray.gif` was recorded, and never reads
+your tmux server.
 
 ## Installer tests
 
