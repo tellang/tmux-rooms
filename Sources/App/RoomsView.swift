@@ -145,7 +145,8 @@ struct RoomsRootView: View {
                 .foregroundStyle(Palette.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
             #if DEBUG
-            if store.isFixture {
+            // UI tests read this strip. The README demo leaves it out of the recording.
+            if store.isFixture, store.fixtureIdentifier != UIFixture.readmeDemo.rawValue {
                 HStack(spacing: 6) {
                     Text("FIXTURE v1")
                         .foregroundStyle(Palette.amber)

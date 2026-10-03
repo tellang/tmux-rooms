@@ -7,6 +7,8 @@ tmux 세션을 한눈에 보고 클릭 한 번으로 원하는 세션에 들어�
 Tmux Rooms는 iTerm2 안에서 tmux를 쓰는 사람을 위한 macOS 메뉴바 앱이다.
 같은 목록을 터미널에서 다루는 명령줄 도구 `tmr`도 함께 들어 있다.
 
+![메뉴바에서 연 Tmux Rooms 패널](docs/images/tray.gif)
+
 ## 만든 이유
 
 iTerm2에서 tmux 세션을 여러 개 띄워 두고 일한다. tmux는 세션을 끝까지 살려 두는
