@@ -70,8 +70,8 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
                 }
             }
             var info = AgentPresenceResolver.agent(for: pane, records: records, table: table)
-            if capturePaneState, info.kind == .codex || info.kind == .agy {
-                let state = await screenState(paneID: pane.paneID)
+            if capturePaneState, let kind = info.kind, kind == .codex || kind == .agy {
+                let state = await screenState(paneID: pane.paneID, kind: kind)
                 info = PaneAgentInfo(kind: info.kind, pid: info.pid, sessionID: info.sessionID, name: info.name, state: state)
             }
             infos[pane.paneID] = info
@@ -87,11 +87,11 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
         return AgentSessionRecord(kind: .codex, pid: nativePID, sessionID: id, name: name, nameIsDerived: false, paneID: pane.paneID, tmuxSessionName: nil, currentPath: pane.currentPath)
     }
 
-    private func screenState(paneID: String) async -> AgentActivityState {
+    private func screenState(paneID: String, kind: AgentKind) async -> AgentActivityState {
         let endpoint = socketPath.map { ["-S", $0] } ?? []
         let invocation = TmuxCommandInvocation(executableURL: tmuxExecutableURL, arguments: endpoint + ["-N", "capture-pane", "-p", "-t", paneID], deadline: .seconds(1), stdoutLimit: 1_048_576, stderrLimit: 65_536)
         guard let output = try? await runner.run(invocation), output.exitCode == 0, output.termination == .exit else { return .unknown }
-        return .visibleScreen(String(decoding: output.stdout, as: UTF8.self))
+        return .visibleScreen(String(decoding: output.stdout, as: UTF8.self), kind: kind)
     }
 
     private func processTable() async -> ProcessTable? {

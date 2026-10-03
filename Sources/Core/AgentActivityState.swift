@@ -7,13 +7,50 @@ public enum AgentActivityState: String, Sendable, Hashable {
     case idle
     case unknown
 
+    /// Codex's status line while a turn runs, as in `Working (12s • esc to interrupt)`.
+    static let interruptMarker = "esc to interrupt"
+    /// Codex's composer prompt, seen live on 2026-10-03 as `» Ask Codex to do anything`.
+    static let codexPromptMarkers: Set<Character> = ["›", "»"]
+    /// Only the bottom of the screen is current; scrollback above it is history.
+    static let screenTailLineCount = 6
+
+    /// `busy` and `idle` are the only values seen in `~/.claude/sessions`.
+    /// Anything else is not guessed at.
     public static func claudeStatus(_ status: String?) -> Self {
-        guard let status = status?.trimmingCharacters(in: .whitespacesAndNewlines), !status.isEmpty else { return .unknown }
-        return status.lowercased() == "busy" ? .busy : .idle
+        switch status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "busy": .busy
+        case "idle": .idle
+        default: .unknown
+        }
     }
 
-    public static func visibleScreen(_ text: String) -> Self {
-        text.localizedCaseInsensitiveContains("esc to interrupt") ? .busy : .idle
+    /// Reads the last non-blank lines of a captured pane. A screen that shows
+    /// neither marker says nothing, so it is `.unknown` rather than idle. Only
+    /// Codex has a verified idle marker.
+    public static func visibleScreen(_ text: String, kind: AgentKind) -> Self {
+        let lines = text.split(whereSeparator: \.isNewline)
+            .filter { !$0.allSatisfy(\.isWhitespace) }
+            .suffix(screenTailLineCount)
+        if lines.contains(where: { $0.containsASCIICaseInsensitive(interruptMarker) }) { return .busy }
+        if kind == .codex, lines.contains(where: { $0.drop(while: \.isWhitespace).first.map(codexPromptMarkers.contains) == true }) {
+            return .idle
+        }
+        return .unknown
+    }
+}
+
+extension StringProtocol {
+    /// Folds only ASCII letters, so a marker never matches through locale or
+    /// Unicode case rules.
+    func containsASCIICaseInsensitive(_ needle: String) -> Bool {
+        func folded(_ byte: UInt8) -> UInt8 { (0x41...0x5A).contains(byte) ? byte | 0x20 : byte }
+        let haystack = utf8.map(folded)
+        let pattern = needle.utf8.map(folded)
+        guard !pattern.isEmpty else { return true }
+        guard haystack.count >= pattern.count else { return false }
+        return (0...(haystack.count - pattern.count)).contains { start in
+            haystack[start..<(start + pattern.count)].elementsEqual(pattern)
+        }
     }
 }
 

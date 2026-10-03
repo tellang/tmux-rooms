@@ -46,15 +46,41 @@ func codexRolloutMetadata() {
     #expect(CodexRolloutSession.sessionID(fromFirstLine: Data(#"{"type":"message","payload":{"id":"user","thread_source":"user"}}"#.utf8)) == nil)
 }
 
-@Test("Claude status comes from its registry while screen state uses interrupt text")
+@Test("Claude status maps only the observed busy and idle values")
 func agentActivitySources() {
-    for (status, expected) in [("busy", AgentActivityState.busy), ("idle", .idle), ("waiting", .idle)] {
+    for (status, expected) in [("busy", AgentActivityState.busy), ("idle", .idle), ("waiting", .unknown), ("", .unknown)] {
         let json = Data("{\"pid\":1,\"name\":\"test\",\"tmux\":\"room:@0.%0\",\"status\":\"\(status)\"}".utf8)
         #expect(ClaudeSessionRegistry.record(fromJSON: json)?.state == expected)
     }
     #expect(AgentActivityState.claudeStatus(nil) == .unknown)
-    #expect(AgentActivityState.visibleScreen("Working (esc to interrupt)") == .busy)
-    #expect(AgentActivityState.visibleScreen("Ready\n> ") == .idle)
+    #expect(AgentActivityState.claudeStatus(" BUSY ") == .busy)
+}
+
+@Test("screen state reads markers only from the last non-blank lines")
+func agentActivityScreenMarkers() {
+    #expect(AgentActivityState.visibleScreen("Working (12s • esc to interrupt)\n\n› ", kind: .codex) == .busy)
+    #expect(AgentActivityState.visibleScreen("Working (ESC TO INTERRUPT)", kind: .codex) == .busy)
+    #expect(AgentActivityState.visibleScreen("output\n\n» Ask Codex to do anything\n\n", kind: .codex) == .idle)
+    #expect(AgentActivityState.visibleScreen("   › Implement {feature}", kind: .codex) == .idle)
+    #expect(AgentActivityState.visibleScreen("", kind: .codex) == .unknown)
+    #expect(AgentActivityState.visibleScreen("Ready\n> ", kind: .codex) == .unknown)
+    let scrolled = (["Working (esc to interrupt)"] + (1...6).map { "line \($0)" }).joined(separator: "\n")
+    #expect(AgentActivityState.visibleScreen(scrolled, kind: .codex) == .unknown)
+    #expect(AgentActivityState.visibleScreen(scrolled + "\n\n\n", kind: .agy) == .unknown)
+}
+
+@Test("agy is busy on the interrupt marker and otherwise unknown")
+func agentActivityAgyHasNoIdleMarker() {
+    #expect(AgentActivityState.visibleScreen("Thinking (esc to interrupt)", kind: .agy) == .busy)
+    #expect(AgentActivityState.visibleScreen("» prompt", kind: .agy) == .unknown)
+    #expect(AgentActivityState.visibleScreen("", kind: .agy) == .unknown)
+}
+
+@Test("ASCII folding does not match through Unicode case rules")
+func asciiCaseInsensitiveSearch() {
+    #expect("Working (Esc To Interrupt)".containsASCIICaseInsensitive("esc to interrupt"))
+    #expect(!"e\u{17F}c to interrupt".containsASCIICaseInsensitive("esc to interrupt"))
+    #expect(!"esc".containsASCIICaseInsensitive("esc to interrupt"))
 }
 
 @Test("OMX cannot replace a stale source pid with the current Codex pid")
