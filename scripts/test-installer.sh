@@ -19,6 +19,13 @@ import Foundation
 print("fixture")
 SWIFT
 xcrun swiftc "$tmp/main.swift" -o "$tmp/fixture-bin"
+# A fixture app that stays up, so the installer can see a running copy.
+cat > "$tmp/sleeper.swift" <<'SWIFT'
+import Foundation
+sleep(30)
+SWIFT
+xcrun swiftc "$tmp/sleeper.swift" -o "$tmp/sleeper-bin"
+fixture_main_bin="$tmp/fixture-bin"
 
 # A second untrusted self-signed identity deliberately reuses the exact CN.
 cat >"$tmp/alternate-openssl.cnf" <<'EOF'
@@ -69,9 +76,9 @@ PLIST
 }
 
 make_app() {
-  local path="$1" version="$2" helper_mode="${3:-valid}" app_mode="${4:-app}"
+  local path="$1" version="$2" helper_mode="${3:-valid}" app_mode="${4:-app}" app_identity="${5:-$identity}"
   mkdir -p "$path/Contents/MacOS" "$path/Contents/Helpers"
-  cp "$tmp/fixture-bin" "$path/Contents/MacOS/TmuxRooms"
+  cp "$fixture_main_bin" "$path/Contents/MacOS/TmuxRooms"
   cp "$tmp/fixture-bin" "$path/Contents/Helpers/tmuxrooms-launch"
   cat >"$path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -103,7 +110,24 @@ PLIST
       codesign --force --sign "$identity" --options runtime --timestamp=none --entitlements "$helper_ent" "$path/Contents/Helpers/tmuxrooms-launch" >/dev/null
       ;;
   esac
-  codesign --force --sign "$identity" --options runtime --timestamp=none --entitlements "$app_ent" "$path" >/dev/null
+  codesign --force --sign "$app_identity" --options runtime --timestamp=none --entitlements "$app_ent" "$path" >/dev/null
+}
+
+# Stands in for `security` on PATH so the installer sees a chosen Keychain
+# listing. Every other subcommand goes to the real tool.
+write_security_shim() {
+  local dir="$1" listing="$2"
+  mkdir -p "$dir"
+  cat >"$dir/security" <<SHIM
+#!/bin/bash
+if [[ "\${1:-}" == find-identity ]]; then
+  printf '%s' '$listing'
+  [[ -n '$listing' ]] || exit 1
+  exit 0
+fi
+exec /usr/bin/security "\$@"
+SHIM
+  chmod 755 "$dir/security"
 }
 
 run_expect() {
@@ -172,9 +196,123 @@ bad_app="$tmp/bad-get-task/Tmux Rooms.app"
 make_app "$bad_app" 2 valid app-get-task
 mkdir -p "$tmp/out-get-task"
 run_expect 4 get-task "$installer" --app-path "$bad_app" --destination "$tmp/out-get-task/Tmux Rooms.app" --yes --non-interactive --no-launch
+# The Keychain reports a same-CN identity whose certificate is not the one that signed the bundle.
 mkdir -p "$tmp/out-same-cn"
-run_expect 4 same-cn-fingerprint env TMUX_ROOMS_INSTALLER_TESTING=1 TMUX_ROOMS_TEST_EXPECTED_FINGERPRINT="$alternate_fingerprint" \
+write_security_shim "$tmp/shim-same-cn" "  1) $alternate_fingerprint \"$identity\"
+     1 valid identities found
+"
+run_expect 4 same-cn-fingerprint env PATH="$tmp/shim-same-cn:$PATH" \
   "$installer" --app-path "$source_app" --destination "$tmp/out-same-cn/Tmux Rooms.app" --yes --non-interactive --no-launch
+real_fingerprint="$(security find-identity -v -p codesigning | awk -v want="\"$identity\"" '{ name = $0; sub(/^[[:space:]]*[0-9]+\)[[:space:]]+[0-9A-Fa-f]+[[:space:]]+/, "", name) } name == want { print $2 }')"
+[[ -n "$real_fingerprint" ]] || fail "cannot read the real identity fingerprint"
+write_security_shim "$tmp/shim-duplicate" "  1) $real_fingerprint \"$identity\"
+  2) $alternate_fingerprint \"$identity\"
+     2 valid identities found
+"
+run_expect 4 duplicate-identity env PATH="$tmp/shim-duplicate:$PATH" \
+  "$installer" --app-path "$source_app" --destination "$tmp/out-same-cn/Tmux Rooms.app" --dry-run --non-interactive --no-launch
+
+# Signing options: --identity, its environment default, --ad-hoc, and their conflict.
+mkdir -p "$tmp/out-options"
+options_dest="$tmp/out-options/Tmux Rooms.app"
+run_expect 64 conflict-identity-first "$installer" --identity "$identity" --ad-hoc \
+  --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 64 conflict-ad-hoc-first "$installer" --ad-hoc --identity "$identity" \
+  --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+grep -q 'cannot be used together' "$tmp/conflict-ad-hoc-first.log" || fail "conflict did not explain itself"
+run_expect 64 identity-missing-name "$installer" --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch --identity
+run_expect 64 identity-empty-name "$installer" --identity "" --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 0 identity-explicit "$installer" --identity "$identity" \
+  --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 4 identity-absent "$installer" --identity "Tmux Rooms Absent Fixture" \
+  --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 4 identity-env-absent env TMUX_ROOMS_SIGNING_IDENTITY="Tmux Rooms Absent Fixture" \
+  "$installer" --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 0 identity-env-present env TMUX_ROOMS_SIGNING_IDENTITY="$identity" \
+  "$installer" --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+# A chosen name is pinned too: the bundle's Authority must be that name, not just any Keychain identity.
+write_security_shim "$tmp/shim-other-name" "  1) $real_fingerprint \"Tmux Rooms Other Fixture\"
+     1 valid identities found
+"
+run_expect 4 identity-authority-mismatch env PATH="$tmp/shim-other-name:$PATH" \
+  "$installer" --identity "Tmux Rooms Other Fixture" --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+
+# Ad hoc mode never consults the Keychain, so a failing `security` must not matter.
+write_security_shim "$tmp/shim-empty" ""
+adhoc_app="$tmp/adhoc-source/Tmux Rooms.app"
+make_app "$adhoc_app" 2 adhoc app -
+run_expect 0 ad-hoc-dry-run env PATH="$tmp/shim-empty:$PATH" \
+  "$installer" --ad-hoc --app-path "$adhoc_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+grep -q 'Automation for iTerm' "$tmp/ad-hoc-dry-run.log" || fail "ad hoc mode did not warn about privacy permissions"
+[[ ! -e "$options_dest" ]] || fail "ad hoc dry run created the destination"
+run_expect 0 ad-hoc-env-overridden env PATH="$tmp/shim-empty:$PATH" TMUX_ROOMS_SIGNING_IDENTITY="Tmux Rooms Absent Fixture" \
+  "$installer" --ad-hoc --app-path "$adhoc_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 4 identity-rejects-ad-hoc "$installer" --app-path "$adhoc_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+adhoc_get_task="$tmp/adhoc-get-task/Tmux Rooms.app"
+make_app "$adhoc_get_task" 2 adhoc app-get-task -
+run_expect 4 ad-hoc-app-entitlements env PATH="$tmp/shim-empty:$PATH" \
+  "$installer" --ad-hoc --app-path "$adhoc_get_task" --destination "$options_dest" --dry-run --non-interactive --no-launch
+adhoc_helper_extra="$tmp/adhoc-helper-extra/Tmux Rooms.app"
+make_app "$adhoc_helper_extra" 2 extra-entitlement app -
+run_expect 4 ad-hoc-helper-entitlements env PATH="$tmp/shim-empty:$PATH" \
+  "$installer" --ad-hoc --app-path "$adhoc_helper_extra" --destination "$options_dest" --dry-run --non-interactive --no-launch
+adhoc_no_runtime="$tmp/adhoc-no-runtime/Tmux Rooms.app"
+make_app "$adhoc_no_runtime" 2 no-runtime app -
+run_expect 4 ad-hoc-helper-runtime env PATH="$tmp/shim-empty:$PATH" \
+  "$installer" --ad-hoc --app-path "$adhoc_no_runtime" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 0 ad-hoc-install env PATH="$tmp/shim-empty:$PATH" \
+  "$installer" --ad-hoc --app-path "$adhoc_app" --destination "$options_dest" --non-interactive --no-launch
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$options_dest/Contents/Info.plist")" == 2 ]] || fail "ad hoc install did not install version 2"
+codesign --verify --strict "$options_dest/Contents/Helpers/tmuxrooms-launch"
+
+# Login item: --login and --no-login only report in a dry run, and conflict with each other.
+fake_login_home="$tmp/login-home"
+mkdir -p "$fake_login_home"
+login_plist="$fake_login_home/Library/LaunchAgents/com.tellang.tmux-rooms.plist"
+# A different HOME also hides the Keychain search list, so list the real identity directly.
+write_security_shim "$tmp/shim-real" "  1) $real_fingerprint \"$identity\"
+     1 valid identities found
+"
+run_expect 64 login-conflict "$installer" --login --no-login \
+  --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+run_expect 64 login-conflict-reversed "$installer" --no-login --login \
+  --app-path "$source_app" --destination "$options_dest" --dry-run --non-interactive --no-launch
+grep -q 'cannot be used together' "$tmp/login-conflict-reversed.log" || fail "login conflict did not explain itself"
+run_expect 0 login-dry-run env HOME="$fake_login_home" PATH="$tmp/shim-real:$PATH" "$installer" --login \
+  --app-path "$source_app" --destination "$old_app" --dry-run --non-interactive
+grep -Fq "Dry run would register login item: $login_plist" "$tmp/login-dry-run.log" || fail "login dry run did not report the agent"
+grep -Fq "Dry run would launch: " "$tmp/login-dry-run.log" || fail "dry run did not report the launch"
+run_expect 0 no-login-dry-run env HOME="$fake_login_home" PATH="$tmp/shim-real:$PATH" "$installer" --no-login \
+  --app-path "$source_app" --destination "$old_app" --dry-run --non-interactive --no-launch
+grep -Fq "Dry run would remove login item: $login_plist" "$tmp/no-login-dry-run.log" || fail "no-login dry run did not report the agent"
+! grep -q 'would launch' "$tmp/no-login-dry-run.log" || fail "--no-launch dry run still reported a launch"
+[[ ! -e "$fake_login_home/Library" && ! -e "$fake_login_home/.local" ]] || fail "login dry run wrote files"
+
+# A copy running from the destination is quit and relaunched; a dry run only says so.
+fixture_main_bin="$tmp/sleeper-bin"
+running_app="$tmp/running/Tmux Rooms.app"
+make_app "$running_app" 1
+fixture_main_bin="$tmp/fixture-bin"
+running_physical="$(cd "$tmp/running" && pwd -P)/Tmux Rooms.app"
+"$running_physical/Contents/MacOS/TmuxRooms" &
+running_pid=$!
+run_expect 0 running-dry-run "$installer" --app-path "$source_app" --destination "$running_app" --dry-run --non-interactive
+run_expect 0 running-dry-run-no-launch "$installer" --app-path "$source_app" --destination "$running_app" --dry-run --non-interactive --no-launch
+kill "$running_pid" 2>/dev/null || true
+wait "$running_pid" 2>/dev/null || true
+grep -Fq "would quit the running app (pid $running_pid) and relaunch it" "$tmp/running-dry-run.log" || fail "dry run did not report the restart"
+grep -Fq "would quit the running app (pid $running_pid) and leave it closed" "$tmp/running-dry-run-no-launch.log" || fail "--no-launch dry run did not report the quit"
+run_expect 0 not-running-dry-run "$installer" --app-path "$source_app" --destination "$running_app" --dry-run --non-interactive --no-launch
+! grep -q 'would quit' "$tmp/not-running-dry-run.log" || fail "dry run reported a quit with nothing running"
+
+# install-cli.sh shares the flags; its argument errors exit before any build.
+cli_installer="$repo_root/scripts/install-cli.sh"
+run_expect 0 cli-help "$cli_installer" --help
+grep -q -- '--ad-hoc' "$tmp/cli-help.log" || fail "install-cli help omits --ad-hoc"
+run_expect 2 cli-conflict "$cli_installer" --ad-hoc --identity "$identity" --destination "$tmp/cli/tmuxrooms"
+grep -q 'cannot be used together' "$tmp/cli-conflict.log" || fail "install-cli conflict did not explain itself"
+run_expect 2 cli-identity-missing-name "$cli_installer" --destination "$tmp/cli/tmuxrooms" --identity
+[[ ! -e "$tmp/cli" ]] || fail "install-cli argument error touched the destination"
 
 # Injected staging/final verification failures preserve and roll back the existing app.
 for phase in staging final; do
@@ -242,4 +380,4 @@ run_expect 6 journal-new-residual "$installer" --app-path "$source_app" --destin
 [[ -x "$old_app/Contents/Helpers/tmuxrooms-launch" ]] || fail "approved install omitted exact helper"
 [[ ! -e "$old_app/Contents/Resources/tmuxrooms-launch" ]] || fail "helper was duplicated into Resources"
 
-echo "PASS: destination boundaries, dry-run, signing policy, entitlement allowlists, and rollback transaction"
+echo "PASS: destination boundaries, dry-run, signing policy, signing options, login item, restart on upgrade, entitlement allowlists, and rollback transaction"
