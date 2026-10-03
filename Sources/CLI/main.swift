@@ -102,7 +102,6 @@ func exec(_ path: String, _ arguments: [String]) -> Never {
     fail("could not run \(path): \(String(cString: strerror(errno)))", code: 126)
 }
 
-let tmuxPath = "/opt/homebrew/bin/tmux"
 let home = NSHomeDirectory()
 let program = URL(fileURLWithPath: CommandLine.arguments[0]).lastPathComponent
 var arguments = Array(CommandLine.arguments.dropFirst())
@@ -114,9 +113,9 @@ if arguments.first == "help" || arguments.contains(where: HelpText.isHelpFlag) {
 
 // A bare invocation, or one that starts with an option or search text, is the
 // chooser. `ls` and `attach` stay available as explicit words.
-var command = "attach"
-if let first = arguments.first, ["ls", "list", "attach", "a"].contains(first) {
-    command = first
+var command = CLICommand.attach
+if let first = arguments.first, let word = CLICommand(word: first) {
+    command = word
     arguments.removeFirst()
 }
 guard let options = parseOptions(arguments) else {
@@ -127,13 +126,13 @@ guard let options = parseOptions(arguments) else {
 let directory = canonicalCurrentDirectory()
 let scope = options.here ? directory : nil
 let rooms = RoomQuery.filter(
-    await loadRooms(capturePaneState: options.json && (command == "ls" || command == "list")),
+    await loadRooms(capturePaneState: command.capturesPaneState(json: options.json)),
     directory: scope,
     text: options.text
 )
 
 switch command {
-case "ls", "list":
+case .list:
     if options.json {
         print(try RoomFormat.json(rooms))
     } else if rooms.isEmpty {
@@ -145,7 +144,7 @@ case "ls", "list":
         print(RoomFormat.table(rooms, home: home, depth: depth))
     }
 
-default:
+case .attach:
     guard !rooms.isEmpty else {
         fail(emptyMessage(options: options, directory: directory, home: home), code: 1)
     }
@@ -157,7 +156,7 @@ default:
         let tmuxArguments = try AttachCommand.arguments(
             sessionID: room.sessionID, readOnly: options.readOnly, insideTmux: insideTmux
         )
-        exec(tmuxPath, tmuxArguments)
+        exec(TmuxExecutable.defaultPath, tmuxArguments)
     } catch {
         fail("read-only attach is not available from inside tmux; detach first or drop -r", code: 2)
     }

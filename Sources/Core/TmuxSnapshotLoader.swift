@@ -15,7 +15,7 @@ public protocol TmuxSnapshotLoading: Sendable {
 
 public struct TmuxSnapshotLoader: TmuxSnapshotLoading, Sendable {
     private let runner:any TmuxCommandRunning; private let executableURL:URL
-    public init(runner:any TmuxCommandRunning=ProcessTmuxCommandRunner(), executableURL:URL=URL(fileURLWithPath:"/opt/homebrew/bin/tmux")) { self.runner=runner; self.executableURL=executableURL }
+    public init(runner:any TmuxCommandRunning=ProcessTmuxCommandRunner(), executableURL:URL=TmuxExecutable.defaultURL) { self.runner=runner; self.executableURL=executableURL }
     public func load(socketURL:URL) async throws -> RoomSnapshot {
         let canonical=canonicalSocket(socketURL), before=try endpoint(canonical)
         let invocation=TmuxCommandInvocation(executableURL:executableURL, arguments:TmuxSnapshotCommand.arguments(socketPath:canonical.path))

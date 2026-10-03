@@ -22,7 +22,7 @@ public final class TerminalController: TerminalControlling {
     private var launches: [String: Task<Result<ManagedTerminalReference, SmokeAutomationError>, Never>] = [:]
     private var lateCompletions: [String: Task<Void, Never>] = [:]
 
-    public init(automation: any ManagedITermAutomating = ITermManagedAutomation(), journal: ManagedClientJournal = .init(), tmuxExecutablePath: String = "/opt/homebrew/bin/tmux", supervisorClient: (any ManagedSupervisorRequesting)? = nil, liveness: any ProcessLivenessProbing = POSIXProcessLiveness(), lateFailureHandler: (@MainActor @Sendable (String) -> Void)? = nil) {
+    public init(automation: any ManagedITermAutomating = ITermManagedAutomation(), journal: ManagedClientJournal = .init(), tmuxExecutablePath: String = TmuxExecutable.defaultPath, supervisorClient: (any ManagedSupervisorRequesting)? = nil, liveness: any ProcessLivenessProbing = POSIXProcessLiveness(), lateFailureHandler: (@MainActor @Sendable (String) -> Void)? = nil) {
         self.automation = automation; self.journal = journal; self.tmuxExecutablePath = tmuxExecutablePath
         self.supervisorClient = supervisorClient ?? ManagedSupervisorClient(journal: journal)
         self.liveness = liveness

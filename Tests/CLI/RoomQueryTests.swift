@@ -122,15 +122,14 @@ struct RoomQueryTests {
         #expect(RoomQuery.filter(all, directory: nil, text: nil).count == 2)
     }
 
-    @Test func chooserAnswerMapsToAZeroBasedIndex() {
-        #expect(RoomQuery.pickIndex("1", count: 3) == 0)
-        #expect(RoomQuery.pickIndex(" 3 ", count: 3) == 2)
-        #expect(RoomQuery.pickIndex("4", count: 3) == nil)
-        #expect(RoomQuery.pickIndex("0", count: 3) == nil)
-        #expect(RoomQuery.pickIndex("", count: 3) == nil)
-        #expect(RoomQuery.pickIndex("x", count: 3) == nil)
-        #expect(RoomQuery.pickIndex(nil, count: 3) == nil)
-        #expect(RoomQuery.pickIndex("1", count: 0) == nil)
+    @Test func commandWordsNormaliseAndOnlyJSONListingCapturesPanes() {
+        #expect(CLICommand(word: "ls") == .list && CLICommand(word: "list") == .list)
+        #expect(CLICommand(word: "attach") == .attach && CLICommand(word: "a") == .attach)
+        #expect(CLICommand(word: "billing") == nil && CLICommand(word: "--json") == nil)
+        #expect(CLICommand.list.capturesPaneState(json: true))
+        #expect(!CLICommand.list.capturesPaneState(json: false))
+        #expect(!CLICommand.attach.capturesPaneState(json: true))
+        #expect(!CLICommand.attach.capturesPaneState(json: false))
     }
 
     @Test func attachTargetsTheSessionIDOutsideTmux() throws {
@@ -209,6 +208,13 @@ struct RoomQueryTests {
         #expect(decoded[0]["paths"] as? [String] == ["/Users/fixture/Projects/app"])
     }
 
+    @Test func jsonWritesARoomWithoutAnAgentAsAnExplicitNull() throws {
+        let text = try RoomFormat.json(rooms([room("$1", name: "plain")]))
+        let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        #expect(decoded[0].keys.contains("agent"))
+        #expect(decoded[0]["agent"] is NSNull)
+    }
+
     @Test func jsonCarriesLivePaneTargetsAndExplicitUnknownFields() throws {
         let source = room("$1", name: "work", paths: ["/p/one", "/p/two"])
         let named = PaneAgentInfo(
@@ -254,8 +260,8 @@ struct RoomQueryTests {
     }
 
     @Test func deadPanesAreNotIncludedInJSON() throws {
-        let live = SessionRoom.Pane(windowID: "@1", paneID: "%1", panePID: 101, currentPath: "/live", title: "", currentCommand: "zsh", isActive: true, isDead: false)
-        let dead = SessionRoom.Pane(windowID: "@1", paneID: "%2", panePID: 102, currentPath: "/dead", title: "", currentCommand: "zsh", isActive: false, isDead: true)
+        let live = SessionRoom.Pane(windowID: "@1", paneID: "%1", panePID: 101, currentPath: "/live", title: "", currentCommand: "zsh", isActive: true, isDead: false, windowIndex: 1, paneIndex: 0)
+        let dead = SessionRoom.Pane(windowID: "@1", paneID: "%2", panePID: 102, currentPath: "/dead", title: "", currentCommand: "zsh", isActive: false, isDead: true, windowIndex: 1, paneIndex: 1)
         let source = SessionRoom(token: SessionToken(server: server, sessionID: "$1", createdAtUnixSeconds: 1), name: "work", lastActivityAtUnixSeconds: 2, panes: [live, dead], clients: [])
         let text = try RoomFormat.json(rooms([source]))
         let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])

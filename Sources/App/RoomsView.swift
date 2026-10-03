@@ -353,7 +353,6 @@ private struct RoomRow: View {
         .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder
     /// Whether the one attached client can be focused, said in a dot.
     ///
     /// This used to be a sentence of its own above the actions. The sentence

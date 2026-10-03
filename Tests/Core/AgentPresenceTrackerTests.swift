@@ -17,7 +17,9 @@ private func trackerRoom(_ sessionID: String = "$0", panePID: Int32 = 86980, pan
             title: "pane",
             currentCommand: "2.1.247",
             isActive: true,
-            isDead: false
+            isDead: false,
+            windowIndex: 0,
+            paneIndex: 0
         )],
         clients: []
     )

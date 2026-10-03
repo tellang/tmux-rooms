@@ -59,8 +59,9 @@ func codexOMXParsing() {
     let table = ProcessTable(psOutput: "100 1 node\n102 100 codex")
     let record = CodexOMXSession.record(fromJSON: json, paneID: "%228", nativePID: 102, currentPath: "/fixture", names: ["t":"제목"], panePID: 100, table: table)
     #expect(record?.pid == 102 && record?.sessionID == "t" && record?.name == "제목")
-    #expect(CodexOMXSession.record(fromJSON: json, paneID: "%229", nativePID: 102, currentPath: "/fixture", names: ["t":"제목"]) == nil)
-    #expect(CodexOMXSession.record(fromJSON: json, paneID: "%228", nativePID: 102, currentPath: "/fixture", names: [:]) == nil)
+    #expect(CodexOMXSession.record(fromJSON: json, paneID: "%229", nativePID: 102, currentPath: "/fixture", names: ["t":"제목"], panePID: 100, table: table) == nil)
+    #expect(CodexOMXSession.record(fromJSON: json, paneID: "%228", nativePID: 102, currentPath: "/fixture", names: [:], panePID: 100, table: table) == nil)
+    #expect(CodexOMXSession.record(fromJSON: json, paneID: "%228", nativePID: 102, currentPath: "/fixture", names: ["t":"제목"], panePID: 200, table: table) == nil)
     #expect(CodexOMXSession.ancestorDirectories(currentPath: "/fixture/home/repo/sub", homeDirectory: URL(fileURLWithPath: "/fixture/home")).map(\.path) == ["/fixture/home/repo/sub", "/fixture/home/repo", "/fixture/home"])
     #expect(CodexOMXSession.ancestorDirectories(currentPath: "/fixture/home-other/repo", homeDirectory: URL(fileURLWithPath: "/fixture/home")).isEmpty)
 }
@@ -113,7 +114,6 @@ func asciiCaseInsensitiveSearch() {
 @Test("OMX cannot replace a stale source pid with the current Codex pid")
 func codexOMXRejectsStalePID() {
     let json = Data(#"{"native_session_id":"stale","pid":999,"tmux_pane_id":"%228","tmux_session_name":"room"}"#.utf8)
-    #expect(CodexOMXSession.record(fromJSON: json, paneID: "%228", nativePID: 102, currentPath: "/fixture", names: ["stale":"Old thread"]) == nil)
     let table = ProcessTable(psOutput: "100 1 node\n102 100 codex\n999 100 zsh")
     #expect(CodexOMXSession.record(fromJSON: json, paneID: "%228", nativePID: 102, currentPath: "/fixture", names: ["stale":"Old thread"], panePID: 100, table: table) == nil)
 }

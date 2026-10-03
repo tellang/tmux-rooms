@@ -104,16 +104,26 @@ enum RoomQuery {
     static func initialCursor(_ rooms: [CLIRoom], directory: String) -> Int {
         rooms.firstIndex { $0.paths.contains(directory) } ?? 0
     }
+}
 
-    /// Reads a 1-based chooser answer and returns the 0-based index it names,
-    /// or `nil` for an empty, non-numeric, or out-of-range answer.
-    static func pickIndex(_ answer: String?, count: Int) -> Int? {
-        guard count > 0,
-              let answer = answer?.trimmingCharacters(in: .whitespaces),
-              let number = Int(answer),
-              (1...count).contains(number)
-        else { return nil }
-        return number - 1
+/// The command word, with its aliases folded so every later decision reads
+/// one spelling.
+enum CLICommand: Equatable {
+    case list
+    case attach
+
+    init?(word: String) {
+        switch word {
+        case "ls", "list": self = .list
+        case "attach", "a": self = .attach
+        default: return nil
+        }
+    }
+
+    /// Screen captures cost a subprocess per agent pane, and only the JSON
+    /// listing prints pane state.
+    func capturesPaneState(json: Bool) -> Bool {
+        self == .list && json
     }
 }
 

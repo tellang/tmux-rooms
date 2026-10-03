@@ -43,7 +43,7 @@ public struct TmuxDeleteExecutor: TmuxDeleting, Sendable {
     private let runner: any TmuxCommandRunning
     private let executableURL: URL
 
-    public init(snapshotLoader: any TmuxSnapshotLoading, runner: any TmuxCommandRunning = ProcessTmuxCommandRunner(), executableURL: URL = URL(fileURLWithPath: "/opt/homebrew/bin/tmux")) {
+    public init(snapshotLoader: any TmuxSnapshotLoading, runner: any TmuxCommandRunning = ProcessTmuxCommandRunner(), executableURL: URL = TmuxExecutable.defaultURL) {
         self.snapshotLoader = snapshotLoader
         self.runner = runner
         self.executableURL = executableURL

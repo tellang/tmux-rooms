@@ -9,7 +9,7 @@ public struct ManagedSupervisorConfiguration: Sendable, Codable, Equatable {
     public let destination: SessionToken
     public let readOnly: Bool
 
-    public init(nonce: String, tmuxExecutablePath: String = "/opt/homebrew/bin/tmux", destination: SessionToken, readOnly: Bool) {
+    public init(nonce: String, tmuxExecutablePath: String = TmuxExecutable.defaultPath, destination: SessionToken, readOnly: Bool) {
         self.nonce = nonce; self.tmuxExecutablePath = tmuxExecutablePath; self.destination = destination; self.readOnly = readOnly
     }
 }
@@ -71,7 +71,7 @@ public enum ManagedSupervisorCLI {
 
 public final class ManagedTmuxSupervisor: @unchecked Sendable {
     /// The only tmux binaries the helper runs, whatever its configuration file says.
-    public static let allowedTmuxExecutables: Set<String> = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"]
+    public static let allowedTmuxExecutables: Set<String> = [TmuxExecutable.defaultPath, "/usr/local/bin/tmux"]
 
     private let journal: ManagedClientJournal
     private let pollInterval: Duration

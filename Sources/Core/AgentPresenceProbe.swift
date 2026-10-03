@@ -34,7 +34,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
         codexRegistryDirectory: URL = CodexSessionRegistry.defaultDirectory(),
         codexHome: URL = CodexSessionIndex.defaultHome(),
         homeDirectory: URL = URL(fileURLWithPath: NSHomeDirectory()),
-        tmuxExecutableURL: URL = URL(fileURLWithPath: "/opt/homebrew/bin/tmux"),
+        tmuxExecutableURL: URL = TmuxExecutable.defaultURL,
         socketPath: String? = nil,
         allowLsofFallback: Bool = false
     ) {

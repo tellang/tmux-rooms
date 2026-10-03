@@ -79,15 +79,11 @@ public enum CodexOMXSession {
         let tmux_session_name: String?
     }
 
-    public static func record(fromJSON data: Data, paneID: String, nativePID: Int32, currentPath: String, names: [String: String], panePID: Int32? = nil, table: ProcessTable? = nil) -> AgentSessionRecord? {
+    public static func record(fromJSON data: Data, paneID: String, nativePID: Int32, currentPath: String, names: [String: String], panePID: Int32, table: ProcessTable) -> AgentSessionRecord? {
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data), payload.pid > 0, nativePID > 0,
-              payload.tmux_pane_id == paneID, let name = names[payload.native_session_id], !name.isEmpty else { return nil }
-        if let table, let panePID {
-            guard table.contains(payload.pid, inTreeOf: panePID),
-                  table.contains(nativePID, inTreeOf: payload.pid) else { return nil }
-        } else {
-            guard payload.pid == nativePID else { return nil }
-        }
+              payload.tmux_pane_id == paneID, let name = names[payload.native_session_id], !name.isEmpty,
+              table.contains(payload.pid, inTreeOf: panePID),
+              table.contains(nativePID, inTreeOf: payload.pid) else { return nil }
         return AgentSessionRecord(kind: .codex, pid: nativePID, sessionID: payload.native_session_id, name: name, nameIsDerived: false, paneID: paneID, tmuxSessionName: payload.tmux_session_name, currentPath: currentPath)
     }
 

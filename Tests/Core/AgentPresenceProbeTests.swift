@@ -50,7 +50,7 @@ private struct AgentFixture {
     func room(panes: [(paneID: String, panePID: Int32)]) -> SessionRoom {
         let server = ServerIdentity(canonicalSocketPath: "/fixture/tmux.sock", socketDevice: 1, socketInode: 2, serverPID: 3, startedAtUnixSeconds: 4)
         let panes = panes.enumerated().map { index, pane in
-            SessionRoom.Pane(windowID: "@0", paneID: pane.paneID, panePID: pane.panePID, currentPath: checkout.path, title: "", currentCommand: "node", isActive: index == 0, isDead: false)
+            SessionRoom.Pane(windowID: "@0", paneID: pane.paneID, panePID: pane.panePID, currentPath: checkout.path, title: "", currentCommand: "node", isActive: index == 0, isDead: false, windowIndex: 0, paneIndex: index)
         }
         return SessionRoom(token: SessionToken(server: server, sessionID: "$0", createdAtUnixSeconds: 5), name: "room", lastActivityAtUnixSeconds: 6, panes: panes, clients: [])
     }

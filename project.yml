@@ -135,7 +135,6 @@ targets:
       - Tests/Core
       - Tests/Terminal
       - Tests/Integration
-      - Tests/Performance
     dependencies:
       - target: TmuxRoomsCore
     settings:

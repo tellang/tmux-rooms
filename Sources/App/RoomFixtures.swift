@@ -192,7 +192,9 @@ private enum Fixtures {
                 title: "editor",
                 currentCommand: command,
                 isActive: true,
-                isDead: false
+                isDead: false,
+                windowIndex: 0,
+                paneIndex: 0
             )],
             clients: clients
         )

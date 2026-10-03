@@ -13,7 +13,9 @@ private func pane(_ paneID: String, pid: Int32, active: Bool = true, dead: Bool 
         title: "pane",
         currentCommand: command,
         isActive: active,
-        isDead: dead
+        isDead: dead,
+        windowIndex: 0,
+        paneIndex: 0
     )
 }
 

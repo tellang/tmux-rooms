@@ -153,6 +153,25 @@ enum RoomFormat {
         let readOnlyClients: Int
         let lastActivity: Int64
         let panes: [JSONPane]
+
+        private enum CodingKeys: String, CodingKey {
+            case id, name, title, agent, paths, interactiveClients, readOnlyClients, lastActivity, panes
+        }
+
+        /// A room with no agent says so with `"agent": null` rather than by
+        /// leaving the key out, the same as a pane does.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(name, forKey: .name)
+            try container.encode(title, forKey: .title)
+            try container.encodeOrNull(agent, forKey: .agent)
+            try container.encode(paths, forKey: .paths)
+            try container.encode(interactiveClients, forKey: .interactiveClients)
+            try container.encode(readOnlyClients, forKey: .readOnlyClients)
+            try container.encode(lastActivity, forKey: .lastActivity)
+            try container.encode(panes, forKey: .panes)
+        }
     }
 
     private struct JSONPane: Encodable {
@@ -189,13 +208,10 @@ enum RoomFormat {
             try container.encode(target, forKey: .target)
             try container.encode(active, forKey: .active)
             try container.encode(path, forKey: .path)
-            if let agent { try container.encode(agent, forKey: .agent) }
-            else { try container.encodeNil(forKey: .agent) }
+            try container.encodeOrNull(agent, forKey: .agent)
             try container.encode(pid, forKey: .pid)
-            if let sessionId { try container.encode(sessionId, forKey: .sessionId) }
-            else { try container.encodeNil(forKey: .sessionId) }
-            if let name { try container.encode(name, forKey: .name) }
-            else { try container.encodeNil(forKey: .name) }
+            try container.encodeOrNull(sessionId, forKey: .sessionId)
+            try container.encodeOrNull(name, forKey: .name)
             try container.encode(state, forKey: .state)
         }
     }
@@ -217,5 +233,12 @@ enum RoomFormat {
             )
         }
         return String(decoding: try encoder.encode(payload), as: UTF8.self)
+    }
+}
+
+private extension KeyedEncodingContainer {
+    /// Keeps a nullable key visible to JSON consumers instead of omitting it.
+    mutating func encodeOrNull(_ value: String?, forKey key: Key) throws {
+        if let value { try encode(value, forKey: key) } else { try encodeNil(forKey: key) }
     }
 }
