@@ -1,108 +1,120 @@
-# T5 decision: managed-client control
+# Managed clients
 
-**Verdict: FAIL** for server-side mutation of an existing app-owned tmux client.
+Why Tmux Rooms opens rooms through tmux clients it owns, instead of moving
+tmux clients that already exist.
 
-Tested on `/opt/homebrew/bin/tmux` **3.6b** using a unique short `-S` socket and
-real PTY clients created by `/usr/bin/script`. No default tmux endpoint was used.
+## The problem
 
-## Why it fails
+Opening a room in an existing terminal tab would mean telling tmux to move a
+client: `switch-client -c <client> -t <session>`. That is only safe if, in the
+same server-side step, tmux confirms three things:
 
-The strongest foreground candidate uses `if-shell -F`, an `L:` client loop, an
-`S:` session loop, then `switch-client -c ... -t ...`. It can compare:
+- the client is the one the app saw (name, TTY, PID, creation time);
+- the session is the one the user clicked (`session_id` and
+  `session_created`, because tmux reuses ids such as `$0` after a session is
+  killed and recreated);
+- the server is the one the app read (PID, start time, and the device and
+  inode of its socket file, because a restarted server can reuse the socket
+  path).
 
-- source: `client_name`, `client_tty`, `client_pid`, `client_created`;
-- destination: `session_id`, `session_created`;
-- server: `socket_path`, `pid`, `start_time`.
+## The tmux limitation
 
-It cannot compare the complete server identity. On tmux 3.6b,
-`display-message -p '#{socket_device}|#{socket_inode}'` returns `|`. Neither
-format appears in the 3.6b format surface. `if-shell` accepts only
-`-t target-pane`; only `switch-client` has `-c target-client`. `display-message`
-can select a client with `-c`, but its result cannot be fed into the same
-foreground conditional command.
+tmux cannot do all of that in one command.
 
-The exact local command surface is:
+- `if-shell -F` evaluates a format condition and runs the branch in the same
+  server turn, so it can compare the client, the session, the server PID, and
+  the start time.
+- No format exposes the socket's device and inode. On tmux 3.6b and 3.7c,
+  `display-message -p '#{socket_device}|#{socket_inode}'` prints `|`.
+- A shell condition could call `stat(2)` on the socket, but tmux runs shell
+  conditions as asynchronous jobs. The branch runs later, so the server could
+  change between the check and the switch.
+- Checking before and after the switch does not help: a wrong client or
+  session has already been moved by the time the second check fails.
 
-```text
-if-shell [-bF] [-t target-pane] shell-command command [command]
-switch-client [-ElnprZ] [-c target-client] [-t target-session] [-T key-table]
-display-message [-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]
-run-shell [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command]
-```
+So the app never mutates a tmux client it did not start.
 
-A shell-mode `if-shell` could call `stat(2)`, but it waits for an asynchronous
-job before inserting the branch. That creates exactly the validation-to-mutation
-gap T5 forbids. Pre/post endpoint validation is therefore not a PASS.
+## The design
 
-## Deterministic race matrix
+The app owns its own tmux client processes and replaces them instead of
+moving them.
 
-`ManagedMutationRaceTests` schedules the state change explicitly before the
-single foreground candidate; the baseline schedules it after successful tuple
-capture. Every process and wait has a deadline.
+- The app opens an iTerm tab that runs the bundled helper,
+  `Contents/Helpers/tmuxrooms-launch --supervise <nonce>`. The nonce is also
+  stored in the iTerm session variable `user.tmuxRoomsNonce`, so the app can
+  find exactly that tab again.
+- The helper is a supervisor (`ManagedTmuxSupervisor`). It starts one tmux
+  client as its child process and records a handshake with its own PID, the
+  child PID, and the destination.
+- Before every attach, the supervisor checks the destination from outside
+  tmux: `lstat` on the socket for device and inode, then `display-message`
+  for server PID, start time, `session_id`, and `session_created`.
+- The attach itself is gated:
+  `tmux -S <socket> -f /dev/null if-shell -F <condition> "attach-session -t <id>" ""`.
+  The condition repeats the server PID, start time, `session_id`, and
+  `session_created` check in the same server turn, so a session recreated
+  under the same id after validation is never attached.
+- To move a managed tab to another room, the app asks the supervisor to
+  switch. The supervisor validates the new destination, stops its child
+  (SIGTERM, then SIGKILL, each bounded to 500 ms), and starts a new gated
+  attach. If validation fails, the old child keeps running and the request
+  is rejected.
+- Every wait has a deadline. A stale endpoint or session fails closed before
+  anything is relaunched.
 
-| Case | Observed result |
-| --- | --- |
-| Exact live source and destination | Best partial candidate switches the intended client only. |
-| Source exits | Old `ClientKey` no longer matches; no mutation. |
-| Replacement PTY client | Different PID/created tuple does not inherit the stale key; no mutation. |
-| Destination disappears | Old `SessionToken` no longer matches; source remains attached. |
-| Server kill/restart and socket inode change | Old server tuple rejects; no mutation. |
-| Same `$0` recreated with different `session_created` | Old token rejects; replacement session is not selected. |
-| Initial attach after `$0` recreation | Destination-gated one-shot exits without attaching. |
+The app and the supervisor talk through files under
+`~/Library/Application Support/Tmux Rooms/ManagedClients`: one record per
+managed tab, the supervisor configuration, the handshake, and request and
+response files. `TerminalController` owns these records and is the only code
+that changes their state. `ManagedClientJournal` reads and writes them
+atomically.
 
-Observed wrong-client/wrong-session mutations: **0**. This does not upgrade the
-verdict because PASS requires binding *all* `ServerIdentity` fields in the same
-server-side mutation turn, and the socket device/inode fields are unavailable.
+## How the room actions use it
 
-## T6 executor
+Each managed record has a launch kind and, for reusable tabs, a role.
 
-Choose the **terminal-side supervisor** fallback; do not implement a production
-tmux controller from this spike.
+| Action | What happens |
+|---|---|
+| Open, room has no client | Uses the one reusable `primary` tab: launches it if there is none, otherwise asks its supervisor to switch to this room. |
+| Open, room has clients | Focuses the existing client in iTerm by exact TTY. Nothing in tmux changes. |
+| Preview | Same as the primary tab, but with the one reusable `preview` tab, attached read-only and titled `READ ONLY · <room>`. |
+| Close Preview | Asks the preview supervisor to detach. Its child exits, the supervisor stops, and iTerm closes the tab. |
+| Duplicate | Always launches a new `explicitDuplicate` tab. Duplicates are never reused or switched. |
 
-- The app-owned primary/Preview tab runs a supervisor that owns its exact tmux
-  child process (PID/process group).
-- A typed switch or detach request boundedly terminates that owned child and
-  relaunches tmux with the destination-token-gated initial attach.
-- `TerminalBridge` remains the journal owner and records intent/result.
-- The supervisor may not target or mutate arbitrary existing tmux clients.
-- Every wait and termination escalation is bounded; a stale endpoint or token
-  fails closed before relaunch.
+Recovery covers records the app cannot attribute with certainty, for example
+two records that both claim the primary role, a tab found without a role, or a
+launch that timed out while iTerm was still working on it. The app lists
+these candidates and lets the user choose one as Primary or Preview, or clean
+it up. Cleaning up detaches through the supervisor, or, when every process
+the record names is provably gone, just retires the record. A closed window
+with no live supervisor, child, or client is retired automatically on the
+next Open or Preview, so ordinary window closing does not end in the recovery
+panel.
 
-The initial-attach `if-shell -F` template may be retained only as the one-shot
-`session_id` + `session_created` recreation gate demonstrated by the test. It is
-not a substitute for full `ServerIdentity` validation.
+## Clients the app does not own
 
-## Reproduction
+Clients started outside the app are shown with their TTY, terminal, and
+session, and can be focused. The app offers no Detach for them, for the same
+reason as above: `detach-client` cannot be bound to a full client identity, and
+a TTY can be reused by a new client between the check and the detach.
 
-Static probe and exact partial command template:
-`Spikes/TmuxMutation/README.md` and `Spikes/TmuxMutation/probe.sh`.
+## Supported tmux versions
 
-Dynamic proof:
+The parser accepts tmux 3.6b and later (`TmuxParser.minimumSupportedVersion`,
+compared through `TmuxVersion`). Pinning one exact version turned an ordinary
+Homebrew upgrade into a total outage, so newer releases are accepted as long
+as the snapshot format still parses. Client flags are treated as an open set,
+so a new flag such as 3.7c's `ignore-size` does not break parsing.
 
-```sh
-xcodebuild -project TmuxRooms.xcodeproj \
-  -scheme TmuxRoomsUnitTests -configuration Debug \
-  -derivedDataPath DerivedDataT5 \
-  test -only-testing:TmuxRoomsTests/ManagedMutationRaceTests
-```
+## Tests
 
-## Supported tmux releases (2026-08-20)
-
-The parser first accepted exactly `3.6b`. That turned an ordinary Homebrew
-upgrade into a total outage: the running 3.6b server kept the app working only
-because its already-deleted binary stayed mapped, and the next server start
-would have made every room unreadable with `unsupportedVersion("3.7c")`.
-
-`TmuxParser.minimumSupportedVersion` is now a floor of `3.6b`, compared through
-`TmuxVersion`, so later releases are accepted and pre-3.6b ones stay rejected.
-
-3.7c was re-verified against the exact snapshot command on a private short
-socket before the floor was introduced. The `#{n:name}` length framing, the five
-boundary fields, and the ten client fields are byte-identical in shape to 3.6b;
-`client_readonly` and `client_control_mode` still report correctly for a real
-read-only PTY client. 3.7c adds an `ignore-size` client flag, which the parser
-already tolerates because it validates `read-only` and `control-mode` against
-their boolean fields and otherwise treats flags as an open set.
-
-The T5 verdict above is unchanged: it describes a format-surface gap that this
-floor does not revisit.
+`Tests/Integration/ManagedMutationRaceTests.swift` runs against a real tmux
+server on a private socket. It checks that the socket device and inode formats
+are still missing, then runs the strongest single-command switch and the gated
+initial attach while injecting each race before the command: the source client
+exits, a new client takes its place, the destination disappears, and the
+server is replaced with a session recreated under the same id. In every case
+nothing is attached or switched to the wrong place.
+`ManagedSupervisorIntegrationTests` covers the supervisor: relaunching its own
+child, read-only Preview, stale destinations, and handshake failures. See
+[testing.md](../testing.md) for how to run them.
