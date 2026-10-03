@@ -9,9 +9,7 @@ import Foundation
 /// beat.
 @MainActor
 public final class AgentPresenceTracker {
-    /// Refreshes between probes when the panes are unchanged. Paired with the
-    /// one-second foreground cadence this is a probe every five seconds, which
-    /// is well inside the time it takes to notice a rename.
+    /// Refreshes between probes when the panes are unchanged: five seconds at the foreground cadence.
     public static let refreshesBetweenProbes = 5
 
     private let probe: any AgentPresenceProbing

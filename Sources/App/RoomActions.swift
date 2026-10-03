@@ -197,8 +197,8 @@ final class ProductionRoomActionHandler: RoomActionHandling {
 
     /// Waits for the controller to finish its current flight.
     ///
-    /// Every stage the controller runs is individually bounded — snapshot loads,
-    /// terminal soft deadlines, supervisor round trips — so this only has to
+    /// Every stage the controller runs is individually bounded: snapshot loads,
+    /// terminal soft deadlines, and supervisor round trips. So this only has to
     /// outlast their sum. It still keeps its own deadline: an unbounded wait
     /// leaves `RoomsStore.phase` stuck outside `.idle`, and that store drops
     /// every later action on the floor, so one stalled flight would take the

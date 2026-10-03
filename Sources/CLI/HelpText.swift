@@ -35,10 +35,10 @@ enum HelpText {
           -r, --read-only     (attach) Attach read-only.
 
         Agents: rooms running claude, codex, or agy (Antigravity) get that word in the
-        AGENT column and the color the tfx HUD gives it: claude orange, codex white,
-        agy blue. The highlighted row swaps text and background, so the bar takes the
-        agent's color. Colors need COLORTERM=truecolor or a 256color TERM. NO_COLOR
-        turns them off, and the highlight is then a plain reverse.
+        AGENT column and a color of its own: claude orange, codex white, agy blue.
+        The highlighted row swaps text and background, so the bar takes the agent's
+        color. Colors need COLORTERM=truecolor or a 256color TERM. NO_COLOR turns
+        them off, and the highlight is then a plain reverse.
 
         <text> narrows the list. It matches, ignoring case, a room's title, tmux name,
         agent (claude, codex, agy), or pane path. A tmux name or session id equal to
@@ -59,7 +59,7 @@ enum HelpText {
           \(program)                    Choose among every room.
           \(program) --here             Choose among the rooms in this directory.
           \(program) billing            Rooms whose title, name, or path mention billing.
-          \(program) -r omx             Read-only view of a room whose name has omx in it.
+          \(program) -r billing         Read-only view of the room that mentions billing.
           \(program) ls --here --json   Machine-readable list for this directory.
         """
     }

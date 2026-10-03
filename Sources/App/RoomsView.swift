@@ -224,7 +224,7 @@ private struct RoomRow: View {
     /// A room running a named coding agent is known by that session's name: it
     /// is what the person working in it chose to call the work. The tmux name is
     /// a launcher-generated string such as
-    /// `omc-tmux-rooms-core-v1-20260901023710`, so it moves to the metadata line
+    /// `agent-20260901023710`, so it moves to the metadata line
     /// rather than being lost.
     private var title: String { presence.title ?? room.name }
 
@@ -353,14 +353,10 @@ private struct RoomRow: View {
         .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder
     /// Whether the one attached client can be focused, said in a dot.
     ///
-    /// This used to be a sentence of its own above the actions. The sentence
-    /// only ever reported one bit, and it cost a line on every card that had a
-    /// client. The bit now rides beside the room's status, and the sentence
-    /// survives as the dot's accessibility label, where the detail is still
-    /// worth having.
+    /// The dot sits beside the room's status and costs no line of its own. The
+    /// full reason is its accessibility label.
     private func focusIndicator(for client: SessionRoom.Client) -> some View {
         let focusability = store.focusability(for: client)
         let ready = focusability.isFocusable
@@ -390,13 +386,7 @@ private struct RoomRow: View {
     }
 }
 
-/// Takes keyboard focus without taking the system's blue ring with it.
-///
-/// Apple draws focus on macOS as a ring around the control and allows that
-/// halo to be customised. The ring itself is drawn by each button style, in
-/// the colour that button already uses, so a card full of differently shaped
-/// buttons does not end up wearing one shared outline in an accent colour that
-/// belongs to nothing else on it.
+/// Takes keyboard focus without the system ring; each button style draws its own in its own color.
 private extension View {
     func keyboardFocusable() -> some View {
         focusable().focusEffectDisabled()
@@ -437,11 +427,9 @@ private extension View {
 
 /// One button for the whole Preview state.
 ///
-/// The room used to carry a separate READ ONLY line above the actions, which
-/// pushed the buttons down the moment a Preview opened and said nothing about
-/// how to end it. The state now lives on the button that caused it: it reads
-/// READ ONLY while a Preview is up, and turns into Close Preview under the
-/// pointer, so the way out is where the way in was.
+/// It reads READ ONLY while a Preview is up and turns into Close Preview under
+/// the pointer, so the way out is where the way in was and the card's layout
+/// does not shift when a Preview opens.
 private struct PreviewControl: View {
     @ObservedObject var store: RoomsStore
     let room: SessionRoom
@@ -738,14 +726,7 @@ private extension SessionRoom {
 }
 
 private extension View {
-    /// The one press response every button on the card uses.
-    ///
-    /// Apple asks for a press state on any custom button, since a button with
-    /// none reads as unresponsive, but leaves the shape of that state to the
-    /// app. Every button here answers the same way: it dips under the press,
-    /// darkens by the same amount whatever its fill, carries a shadow along the
-    /// inside of its top edge, and springs back on release. One response across
-    /// seven differently shaped buttons is what makes them feel like one set.
+    /// The one press response every button on the card uses: dip, darken, inner shadow, spring back.
     func pressedResponse(_ pressed: Bool, in shape: some InsettableShape) -> some View {
         overlay {
             shape.fill(Color.black.opacity(pressed ? 0.28 : 0))

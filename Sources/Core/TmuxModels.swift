@@ -33,11 +33,13 @@ public struct ClientKey: Sendable, Hashable {
 public struct SessionRoom: Sendable, Hashable {
     public struct Pane: Sendable, Hashable {
         public let windowID: String; public let paneID: String; public let panePID: Int32
+        public let windowIndex: Int; public let paneIndex: Int
         public let currentPath: String; public let title: String; public let currentCommand: String
         public let isActive: Bool; public let isDead: Bool
-        public init(windowID: String, paneID: String, panePID: Int32, currentPath: String, title: String, currentCommand: String, isActive: Bool, isDead: Bool) {
+        public init(windowID: String, paneID: String, panePID: Int32, currentPath: String, title: String, currentCommand: String, isActive: Bool, isDead: Bool, windowIndex: Int, paneIndex: Int) {
             self.windowID = windowID; self.paneID = paneID; self.panePID = panePID; self.currentPath = currentPath
             self.title = title; self.currentCommand = currentCommand; self.isActive = isActive; self.isDead = isDead
+            self.windowIndex = windowIndex; self.paneIndex = paneIndex
         }
     }
     public struct Client: Sendable, Hashable {

@@ -139,7 +139,7 @@ public enum TmuxSnapshotCommand {
     public static let endFormat = "E" + String(boundaryFormat.dropFirst())
     public static let sessionFormat = "S" + ["session_id","session_created","session_name","session_activity","session_attached"].map(f).joined()
     public static let clientFormat = "C" + ["client_name","client_tty","client_pid","client_created","session_id","client_activity","client_flags","client_readonly","client_termname","client_control_mode"].map(f).joined()
-    public static let paneFormat = "P" + ["session_id","window_id","pane_id","pane_pid","pane_current_path","pane_title","pane_current_command","pane_active","pane_dead"].map(f).joined()
+    public static let paneFormat = "P" + ["session_id","window_id","pane_id","pane_pid","pane_current_path","pane_title","pane_current_command","pane_active","pane_dead","window_index","pane_index"].map(f).joined()
     private static let emptyBranch = "display-message -p '\(endFormat)'"
     private static let populatedBranch = "list-sessions -F '\(sessionFormat)' ; list-clients -F '\(clientFormat)' ; list-panes -a -F '\(paneFormat)' ; display-message -p '\(endFormat)'"
     public static func arguments(socketPath:String)->[String] {

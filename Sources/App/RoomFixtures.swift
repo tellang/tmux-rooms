@@ -51,6 +51,7 @@ enum UIFixture: String, CaseIterable {
     case singleFlight = "v1-single-flight"
     case agentNamed = "v1-agent-named"
     case agentDetected = "v1-agent-detected"
+    case readmeDemo = "readme-demo"
 
     @MainActor
     func makeStore() -> RoomsStore {
@@ -141,16 +142,35 @@ enum UIFixture: String, CaseIterable {
         case .singleFlight:
             return Definition(snapshot: Fixtures.snapshot([Fixtures.room(name: "single-flight", id: "$9")]), blocksActions: true)
         case .agentNamed:
-            let room = Fixtures.room(name: "omc-tmux-rooms-core-v1-20260901023710", id: "$10", command: "2.1.247")
+            let room = Fixtures.room(name: "agent-20260901023710", id: "$10", command: "2.1.247")
             return Definition(
                 snapshot: Fixtures.snapshot([room]),
                 agentPresence: ["$10": .named(.claude, "9.1 배포 경계")]
             )
         case .agentDetected:
-            let room = Fixtures.room(name: "omc-projects-detached-20260826230948", id: "$11", command: "codex")
+            let room = Fixtures.room(name: "agent-detached-20260826230948", id: "$11", command: "codex")
             return Definition(
                 snapshot: Fixtures.snapshot([room]),
                 agentPresence: ["$11": .detected(.codex)]
+            )
+        case .readmeDemo:
+            // The rooms shown in the README screenshot.
+            let now = Int64(Date().timeIntervalSince1970)
+            let rooms = [
+                Fixtures.room(name: "agent-20260901023710", id: "$20", clients: [Fixtures.client(name: "ttys004", pid: 401)], command: "claude", path: "/Users/fixture/code/web-app", lastActivity: now - 40),
+                Fixtures.room(name: "agent-20261002114502", id: "$21", command: "codex", path: "/Users/fixture/code/sync-service", lastActivity: now - 300),
+                Fixtures.room(name: "agent-20261003091233", id: "$22", clients: [Fixtures.client(name: "ttys007", pid: 402), Fixtures.client(name: "ttys009", pid: 403, readOnly: true)], command: "claude", path: "/Users/fixture/code/billing-api", lastActivity: now - 900),
+                Fixtures.room(name: "agy-review", id: "$23", command: "agy", path: "/Users/fixture/code/docs-site", lastActivity: now - 3_600),
+                Fixtures.room(name: "infra", id: "$24", path: "/Users/fixture/code/infra", lastActivity: now - 86_400),
+            ]
+            return Definition(
+                snapshot: Fixtures.snapshot(rooms),
+                agentPresence: [
+                    "$20": .named(.claude, "Fix login redirect"),
+                    "$21": .named(.codex, "Add retry to the sync job"),
+                    "$22": .named(.claude, "Review the billing webhook"),
+                    "$23": .detected(.agy),
+                ]
             )
         }
     }
@@ -179,20 +199,29 @@ private enum Fixtures {
         RoomSnapshot(server: server, rooms: rooms)
     }
 
-    static func room(name: String, id: String, clients: [SessionRoom.Client] = [], command: String = "zsh") -> SessionRoom {
+    static func room(
+        name: String,
+        id: String,
+        clients: [SessionRoom.Client] = [],
+        command: String = "zsh",
+        path: String = "/Users/fixture/Projects/tmux-rooms",
+        lastActivity: Int64 = 1_700_000_300
+    ) -> SessionRoom {
         SessionRoom(
             token: SessionToken(server: server, sessionID: id, createdAtUnixSeconds: 1_700_000_100),
             name: name,
-            lastActivityAtUnixSeconds: 1_700_000_300,
+            lastActivityAtUnixSeconds: lastActivity,
             panes: [SessionRoom.Pane(
                 windowID: "@1",
                 paneID: "%1",
                 panePID: 101,
-                currentPath: "/Users/fixture/Projects/tmux-rooms",
+                currentPath: path,
                 title: "editor",
                 currentCommand: command,
                 isActive: true,
-                isDead: false
+                isDead: false,
+                windowIndex: 0,
+                paneIndex: 0
             )],
             clients: clients
         )

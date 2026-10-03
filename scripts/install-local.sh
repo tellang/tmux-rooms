@@ -11,8 +11,16 @@ approve_replace=0
 dry_run=0
 non_interactive=0
 launch_after_install=1
-expected_identity="Tmux Rooms Local Development"
+expected_identity="${TMUX_ROOMS_SIGNING_IDENTITY:-Tmux Rooms Local Development}"
 expected_fingerprint=""
+identity_flag=0
+ad_hoc=0
+login_action=""
+login_label="com.tellang.tmux-rooms"
+login_plist="$HOME/Library/LaunchAgents/$login_label.plist"
+login_log_dir="$HOME/.local/state/tmux-rooms"
+app_executable="TmuxRooms"
+app_bundle_id="com.tellang.tmuxrooms"
 
 usage() {
   cat <<'EOF'
@@ -21,10 +29,21 @@ Usage: scripts/install-local.sh [options]
 Build, verify, and install the signed Release application.
 
 Options:
+  --identity NAME        sign with this Keychain code-signing identity; it must
+                         exist exactly once and its certificate is pinned
+                         (default: $TMUX_ROOMS_SIGNING_IDENTITY when set,
+                         otherwise "Tmux Rooms Local Development")
+  --ad-hoc               sign ad hoc instead; no Keychain identity is needed,
+                         so certificate pinning is skipped, but signature,
+                         bundle identifier, and entitlement checks still run
   --yes                  explicitly approve replacing an existing destination
   --dry-run              build and verify, but do not copy or launch
   --non-interactive      never prompt; fail if replacement lacks --yes
-  --no-launch            do not launch after installation
+  --no-launch            do not launch after installation; a running copy is
+                         still quit so the old binary does not keep running
+  --login                start the app at login through a per-user LaunchAgent
+                         (~/Library/LaunchAgents/com.tellang.tmux-rooms.plist)
+  --no-login             remove that LaunchAgent
   --build-dir PATH       DerivedData directory (default: repo/DerivedData)
   --app-path PATH        verify/install an existing app instead of building
   --destination PATH     install destination (default: /Applications/Tmux Rooms.app)
@@ -34,6 +53,107 @@ EOF
 
 die_safety() { echo "Unsafe destination: $*" >&2; exit 3; }
 die_verification() { echo "Bundle verification failed: $*" >&2; exit 4; }
+
+# PIDs of the app running from the exact destination bundle. Copies running
+# from anywhere else, such as a debug build, are left alone.
+running_app_pids() {
+  local pid executable
+  for pid in $(pgrep -x "$app_executable" 2>/dev/null || true); do
+    executable="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    if [[ "$executable" == "$destination/Contents/MacOS/$app_executable" ]]; then
+      printf '%s\n' "$pid"
+    fi
+  done
+  return 0
+}
+
+any_pid_alive() {
+  local pid
+  for pid in "$@"; do
+    kill -0 "$pid" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+# Asks the app to quit the way the menu does and waits up to ten seconds.
+# Never force-kills: an app that refuses to quit is reported, not destroyed.
+quit_running_app() {
+  local waited=0
+  echo "Quitting the running Tmux Rooms so the new version replaces it"
+  osascript -e "quit app id \"$app_bundle_id\"" >/dev/null 2>&1 || true
+  while any_pid_alive "$@"; do
+    if [[ "$waited" -ge 50 ]]; then
+      echo "Tmux Rooms is still running after 10 seconds (pid $*); quit it from its menu bar icon and run the installer again" >&2
+      return 1
+    fi
+    sleep 0.2
+    waited=$((waited + 1))
+  done
+}
+
+xml_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+# The agent goes through `open -a` so LaunchServices sees the launch. Starting
+# the binary directly bypasses it and puts a second icon in the menu bar.
+# KeepAlive stays false so quitting the app is not undone by launchd.
+register_login_item() {
+  local app="$1" temp domain
+  domain="gui/$(id -u)"
+  mkdir -p "$(dirname "$login_plist")" "$login_log_dir"
+  temp="$(mktemp "$login_plist.XXXXXX")"
+  cat >"$temp" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$login_label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>-a</string>
+    <string>$(xml_escape "$app")</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>$(xml_escape "$login_log_dir/launchd.out.log")</string>
+  <key>StandardErrorPath</key>
+  <string>$(xml_escape "$login_log_dir/launchd.err.log")</string>
+</dict>
+</plist>
+PLIST
+  if ! plutil -lint -s "$temp"; then
+    rm -f "$temp"
+    echo "Generated LaunchAgent failed plutil -lint" >&2
+    return 1
+  fi
+  chmod 644 "$temp"
+  mv -f "$temp" "$login_plist"
+  launchctl bootout "$domain" "$login_plist" >/dev/null 2>&1 || true
+  if [[ "$launch_after_install" -eq 1 ]]; then
+    # RunAtLoad runs `open -a` now. The app was already opened above, so this
+    # only activates that instance instead of starting a second one.
+    launchctl bootstrap "$domain" "$login_plist" || { echo "launchctl bootstrap failed for $login_plist" >&2; return 1; }
+    echo "Login item registered: $login_plist"
+  else
+    echo "Login item written: $login_plist (not loaded because of --no-launch; it takes effect at next login)"
+  fi
+}
+
+remove_login_item() {
+  if [[ ! -e "$login_plist" && ! -L "$login_plist" ]]; then
+    echo "No login item to remove: $login_plist"
+    return 0
+  fi
+  launchctl bootout "gui/$(id -u)" "$login_plist" >/dev/null 2>&1 || true
+  rm -f -- "$login_plist"
+  echo "Login item removed: $login_plist"
+}
 
 normalize_source() {
   local path="$1" parent base
@@ -90,7 +210,14 @@ signature_details() {
 
 resolve_expected_fingerprint() {
   local matches
-  matches="$(security find-identity -v -p codesigning 2>/dev/null | sed -nE 's/^[[:space:]]*[0-9]+\)[[:space:]]+([0-9A-Fa-f]{40}) "Tmux Rooms Local Development"$/\1/p')"
+  # The name is compared as a plain string, never as a pattern.
+  matches="$(security find-identity -v -p codesigning 2>/dev/null |
+    TMUX_ROOMS_WANTED_IDENTITY="\"$expected_identity\"" awk '
+      $1 ~ /^[0-9]+\)$/ && length($2) == 40 && $2 ~ /^[0-9A-Fa-f]+$/ {
+        name = $0
+        sub(/^[[:space:]]*[0-9]+\)[[:space:]]+[0-9A-Fa-f]+[[:space:]]+/, "", name)
+        if (name == ENVIRON["TMUX_ROOMS_WANTED_IDENTITY"]) print $2
+      }')"
   [[ "$(grep -c . <<<"$matches")" -eq 1 ]] || return 1
   tr '[:lower:]' '[:upper:]' <<<"$matches"
 }
@@ -129,22 +256,26 @@ validate_bundle() {
 
   details="$(signature_details "$bundle")"
   helper_details="$(signature_details "$helper")"
-  grep -Fxq "Authority=$expected_identity" <<<"$details" || { echo "app signing identity mismatch" >&2; return 1; }
-  grep -Fxq "Authority=$expected_identity" <<<"$helper_details" || { echo "helper signing identity mismatch or ad-hoc signature" >&2; return 1; }
-  ! grep -q 'Signature=adhoc' <<<"$details" || { echo "app must not be ad-hoc signed" >&2; return 1; }
-  ! grep -q 'Signature=adhoc' <<<"$helper_details" || { echo "helper must not be ad-hoc signed" >&2; return 1; }
   grep -Eq 'flags=.*runtime' <<<"$details" || { echo "app Hardened Runtime flag is missing" >&2; return 1; }
   grep -Eq 'flags=.*runtime' <<<"$helper_details" || { echo "helper Hardened Runtime flag is missing" >&2; return 1; }
 
-  app_hash="$(certificate_requirement_hash "$bundle")"
-  helper_hash="$(certificate_requirement_hash "$helper")"
-  [[ -n "$app_hash" && "$app_hash" == "$helper_hash" ]] || { echo "app/helper designated requirements do not bind the same certificate" >&2; return 1; }
-  app_fingerprint="$(embedded_leaf_fingerprint "$bundle")" || { echo "cannot extract app leaf certificate" >&2; return 1; }
-  helper_fingerprint="$(embedded_leaf_fingerprint "$helper")" || { echo "cannot extract helper leaf certificate" >&2; return 1; }
-  [[ "$app_fingerprint" == "$expected_fingerprint" && "$helper_fingerprint" == "$expected_fingerprint" ]] || {
-    echo "app/helper leaf certificate fingerprint does not match the unique Keychain identity" >&2
-    return 1
-  }
+  # An ad hoc signature carries no certificate, so there is nothing to pin.
+  if [[ "$ad_hoc" -eq 0 ]]; then
+    grep -Fxq "Authority=$expected_identity" <<<"$details" || { echo "app signing identity mismatch" >&2; return 1; }
+    grep -Fxq "Authority=$expected_identity" <<<"$helper_details" || { echo "helper signing identity mismatch or ad-hoc signature" >&2; return 1; }
+    ! grep -q 'Signature=adhoc' <<<"$details" || { echo "app must not be ad-hoc signed" >&2; return 1; }
+    ! grep -q 'Signature=adhoc' <<<"$helper_details" || { echo "helper must not be ad-hoc signed" >&2; return 1; }
+
+    app_hash="$(certificate_requirement_hash "$bundle")"
+    helper_hash="$(certificate_requirement_hash "$helper")"
+    [[ -n "$app_hash" && "$app_hash" == "$helper_hash" ]] || { echo "app/helper designated requirements do not bind the same certificate" >&2; return 1; }
+    app_fingerprint="$(embedded_leaf_fingerprint "$bundle")" || { echo "cannot extract app leaf certificate" >&2; return 1; }
+    helper_fingerprint="$(embedded_leaf_fingerprint "$helper")" || { echo "cannot extract helper leaf certificate" >&2; return 1; }
+    [[ "$app_fingerprint" == "$expected_fingerprint" && "$helper_fingerprint" == "$expected_fingerprint" ]] || {
+      echo "app/helper leaf certificate fingerprint does not match the unique Keychain identity" >&2
+      return 1
+    }
+  fi
 
   app_entitlements="$(entitlements_json "$bundle")" || { echo "cannot read app entitlements" >&2; return 1; }
   [[ "$app_entitlements" == '{"com.apple.security.automation.apple-events":true}' ]] || {
@@ -293,7 +424,18 @@ while (($#)); do
     --yes) approve_replace=1 ;;
     --dry-run) dry_run=1 ;;
     --non-interactive) non_interactive=1 ;;
+    --identity)
+      shift
+      [[ -n "${1:-}" ]] || { echo "--identity requires a name" >&2; usage >&2; exit 64; }
+      expected_identity="$1"
+      identity_flag=1
+      ;;
+    --ad-hoc) ad_hoc=1 ;;
     --no-launch) launch_after_install=0 ;;
+    --login|--no-login)
+      [[ -z "$login_action" || "$login_action" == "$1" ]] || { echo "--login and --no-login cannot be used together" >&2; usage >&2; exit 64; }
+      login_action="$1"
+      ;;
     --build-dir) shift; build_dir="${1:?--build-dir requires a path}" ;;
     --app-path) shift; app_path="${1:?--app-path requires a path}" ;;
     --destination) shift; destination="${1:?--destination requires a path}" ;;
@@ -302,6 +444,18 @@ while (($#)); do
   esac
   shift
 done
+
+if [[ "$ad_hoc" -eq 1 && "$identity_flag" -eq 1 ]]; then
+  echo "--identity and --ad-hoc cannot be used together" >&2
+  usage >&2
+  exit 64
+fi
+if [[ "$ad_hoc" -eq 1 ]]; then
+  sign_identity="-"
+  echo "note: signing ad hoc. The signature changes with every rebuild, so macOS may ask again for privacy permissions such as Automation for iTerm." >&2
+else
+  sign_identity="$expected_identity"
+fi
 
 if [[ -z "$app_path" ]]; then
   if [[ "$build_dir" != /* ]]; then
@@ -312,13 +466,13 @@ if [[ -z "$app_path" ]]; then
     -scheme "$scheme" \
     -configuration Release \
     -derivedDataPath "$build_dir" \
+    CODE_SIGN_IDENTITY="$sign_identity" \
     build
   app_path="$build_dir/Build/Products/Release/Tmux Rooms.app"
 fi
 
-expected_fingerprint="$(resolve_expected_fingerprint)" || die_verification "expected signing identity must exist exactly once in the current Keychain"
-if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && -n "${TMUX_ROOMS_TEST_EXPECTED_FINGERPRINT:-}" ]]; then
-  expected_fingerprint="$TMUX_ROOMS_TEST_EXPECTED_FINGERPRINT"
+if [[ "$ad_hoc" -eq 0 ]]; then
+  expected_fingerprint="$(resolve_expected_fingerprint)" || die_verification "signing identity \"$expected_identity\" must exist exactly once in the current Keychain"
 fi
 app_path="$(normalize_source "$app_path")"
 destination="$(normalize_destination "$destination")"
@@ -347,6 +501,20 @@ if [[ "$dry_run" -eq 1 ]]; then
   else
     echo "Dry run would install: $destination"
   fi
+  running="$(running_app_pids)"
+  if [[ -n "$running" ]]; then
+    if [[ "$launch_after_install" -eq 1 ]]; then
+      echo "Dry run would quit the running app (pid $(echo $running)) and relaunch it"
+    else
+      echo "Dry run would quit the running app (pid $(echo $running)) and leave it closed (--no-launch)"
+    fi
+  elif [[ "$launch_after_install" -eq 1 ]]; then
+    echo "Dry run would launch: $destination"
+  fi
+  case "$login_action" in
+    --login) echo "Dry run would register login item: $login_plist" ;;
+    --no-login) echo "Dry run would remove login item: $login_plist" ;;
+  esac
   exit 0
 fi
 
@@ -455,6 +623,16 @@ if [[ "${TMUX_ROOMS_INSTALLER_TESTING:-0}" == 1 && "${TMUX_ROOMS_TEST_FAIL_PHASE
   exit 86
 fi
 
+# A running copy keeps executing the old binary after the swap, and `open`
+# would only bring that old process forward, so it is quit first.
+was_running=0
+running="$(running_app_pids)"
+if [[ -n "$running" ]]; then
+  was_running=1
+  # shellcheck disable=SC2086
+  quit_running_app $running || exit 7
+fi
+
 if [[ "$destination_exists" -eq 1 ]]; then
   "$atomic_tool" "$destination" "$staging"
   swap_completed=1
@@ -486,7 +664,14 @@ new_install_renamed=0
 trap - EXIT INT TERM
 rm -rf "$atomic_tool_dir"
 
+echo "Installed: $destination"
 if [[ "$launch_after_install" -eq 1 ]]; then
   open "$destination"
+  [[ "$was_running" -eq 0 ]] || echo "Relaunched: $destination"
+elif [[ "$was_running" -eq 1 ]]; then
+  echo "note: Tmux Rooms was quit for the upgrade and not relaunched because of --no-launch" >&2
 fi
-echo "Installed: $destination"
+case "$login_action" in
+  --login) register_login_item "$destination" ;;
+  --no-login) remove_login_item ;;
+esac

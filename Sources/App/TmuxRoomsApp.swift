@@ -87,10 +87,9 @@ struct TmuxRoomsApp: App {
                     }.run(runID: runID)
                 }
             }
-        } catch where arguments.contains("--iterm-automation-smoke") {
-            Task { @MainActor in NSApplication.shared.terminate(nil) }
         } catch {
-            // Normal app launches have no smoke argument.
+            // Only a launch that asked for the smoke run can throw here.
+            Task { @MainActor in NSApplication.shared.terminate(nil) }
         }
     }
     #endif

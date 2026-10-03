@@ -7,7 +7,7 @@ private let trackerServer = ServerIdentity(canonicalSocketPath: "/tmp/t.sock", s
 private func trackerRoom(_ sessionID: String = "$0", panePID: Int32 = 86980, paneID: String = "%184") -> SessionRoom {
     SessionRoom(
         token: SessionToken(server: trackerServer, sessionID: sessionID, createdAtUnixSeconds: 1_700_000_001),
-        name: "omc-room",
+        name: "agent-room",
         lastActivityAtUnixSeconds: 1_700_000_002,
         panes: [SessionRoom.Pane(
             windowID: "@1",
@@ -17,7 +17,9 @@ private func trackerRoom(_ sessionID: String = "$0", panePID: Int32 = 86980, pan
             title: "pane",
             currentCommand: "2.1.247",
             isActive: true,
-            isDead: false
+            isDead: false,
+            windowIndex: 0,
+            paneIndex: 0
         )],
         clients: []
     )

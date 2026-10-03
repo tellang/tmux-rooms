@@ -16,9 +16,7 @@ public enum ClaudeConversationTitles {
     static let tailByteCount = 262_144
 
     public static var defaultProjectsDirectory: URL {
-        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appending(path: ".claude", directoryHint: .isDirectory)
-            .appending(path: "projects", directoryHint: .isDirectory)
+        ClaudeSessionRegistry.configDirectory().appending(path: "projects", directoryHint: .isDirectory)
     }
 
     private struct TitleRecord: Decodable {
@@ -37,7 +35,7 @@ public enum ClaudeConversationTitles {
         for line in data.split(separator: 0x0a).reversed() {
             guard let record = try? JSONDecoder().decode(TitleRecord.self, from: Data(line)) else { continue }
             guard record.type == "ai-title" || record.type == "custom-title" else { continue }
-            guard let title = record.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { continue }
+            guard let title = record.title.map(TerminalText.sanitized)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { continue }
             return title
         }
         return nil
@@ -61,11 +59,10 @@ public enum ClaudeConversationTitles {
     }
 
     private static func tail(of url: URL) -> Data? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        guard let size = try? handle.seekToEnd() else { return nil }
-        let offset = size > UInt64(tailByteCount) ? size - UInt64(tailByteCount) : 0
-        guard (try? handle.seek(toOffset: offset)) != nil else { return nil }
-        return try? handle.readToEnd()
+        guard let file = BoundedFileReader.open(url) else { return nil }
+        defer { try? file.handle.close() }
+        let offset = file.size > UInt64(tailByteCount) ? file.size - UInt64(tailByteCount) : 0
+        guard (try? file.handle.seek(toOffset: offset)) != nil else { return nil }
+        return try? file.handle.read(upToCount: tailByteCount)
     }
 }

@@ -67,8 +67,8 @@ struct RoomActionsIdleDeadlineTests {
         }
 
         // Guards against the wait ever becoming a synchronous block. It does
-        // not distinguish polling from a `Task.yield()` spin — that spin also
-        // yields, it just burns a core doing it.
+        // not distinguish polling from a `Task.yield()` spin. That spin also
+        // yields; it just burns a core doing it.
         #expect(ticks >= 10)
         #expect(await result == .failed(.timeout(underlyingOperationRunning: true)))
     }

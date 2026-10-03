@@ -28,32 +28,36 @@ private func room(
         name: name,
         lastActivityAtUnixSeconds: activity,
         panes: paths.enumerated().map { offset, path in
-            SessionRoom.Pane(windowID: "@\(offset)", paneID: "%\(offset)", panePID: Int32(200 + offset), currentPath: path, title: "pane", currentCommand: "node", isActive: offset == 0, isDead: false)
+            SessionRoom.Pane(windowID: "@\(offset)", paneID: "%\(offset)", panePID: Int32(200 + offset), currentPath: path, title: "pane", currentCommand: "node", isActive: offset == 0, isDead: false, windowIndex: 2, paneIndex: offset + 3)
         },
         clients: clients
     )
 }
 
-private func rooms(_ list: [SessionRoom], presence: [String: AgentPresence] = [:]) -> [CLIRoom] {
-    RoomQuery.rooms(from: RoomSnapshot(server: server, rooms: list), presence: presence)
+private func rooms(
+    _ list: [SessionRoom],
+    presence: [String: AgentPresence] = [:],
+    panes: [String: PaneAgentInfo] = [:]
+) -> [CLIRoom] {
+    RoomQuery.rooms(from: RoomSnapshot(server: server, rooms: list), presence: presence, panes: panes)
 }
 
 @Suite("CLI room query")
 struct RoomQueryTests {
     @Test func agentLabelReplacesTmuxNameAndKeepsIt() {
         let result = rooms(
-            [room("$1", name: "omx-app-1790736413784-94242v")],
+            [room("$1", name: "codex-app-1790736413784-94242v")],
             presence: ["$1": .named(.claude, "9.1 배포 경계")]
         )
         #expect(result[0].title == "9.1 배포 경계")
-        #expect(result[0].tmuxName == "omx-app-1790736413784-94242v")
+        #expect(result[0].tmuxName == "codex-app-1790736413784-94242v")
         #expect(result[0].agent == .claude)
         #expect(!result[0].titleIsTmuxName)
     }
 
     @Test func detectedAgentIsLabelledByProductAndRoomWithoutAgentKeepsName() {
         let result = rooms(
-            [room("$1", name: "omx-app"), room("$2", name: "plain-shell", activity: 1_700_000_050)],
+            [room("$1", name: "codex-app"), room("$2", name: "plain-shell", activity: 1_700_000_050)],
             presence: ["$1": .detected(.codex)]
         )
         #expect(result.map(\.title) == ["Codex", "plain-shell"])
@@ -94,11 +98,11 @@ struct RoomQueryTests {
 
     @Test func textMatchesTitleNameAgentAndPathIgnoringCase() {
         let all = rooms(
-            [room("$1", name: "omx-app", paths: ["/p/Billing"]), room("$2", name: "misc", paths: ["/p/x"])],
+            [room("$1", name: "codex-app", paths: ["/p/Billing"]), room("$2", name: "misc", paths: ["/p/x"])],
             presence: ["$1": .named(.claude, "배포 경계")]
         )
         #expect(RoomQuery.filter(all, directory: nil, text: "배포").map(\.sessionID) == ["$1"])
-        #expect(RoomQuery.filter(all, directory: nil, text: "OMX").map(\.sessionID) == ["$1"])
+        #expect(RoomQuery.filter(all, directory: nil, text: "CODEX-APP").map(\.sessionID) == ["$1"])
         #expect(RoomQuery.filter(all, directory: nil, text: "claude").map(\.sessionID) == ["$1"])
         #expect(RoomQuery.filter(all, directory: nil, text: "billing").map(\.sessionID) == ["$1"])
         #expect(RoomQuery.filter(all, directory: nil, text: "nothing").isEmpty)
@@ -118,15 +122,14 @@ struct RoomQueryTests {
         #expect(RoomQuery.filter(all, directory: nil, text: nil).count == 2)
     }
 
-    @Test func chooserAnswerMapsToAZeroBasedIndex() {
-        #expect(RoomQuery.pickIndex("1", count: 3) == 0)
-        #expect(RoomQuery.pickIndex(" 3 ", count: 3) == 2)
-        #expect(RoomQuery.pickIndex("4", count: 3) == nil)
-        #expect(RoomQuery.pickIndex("0", count: 3) == nil)
-        #expect(RoomQuery.pickIndex("", count: 3) == nil)
-        #expect(RoomQuery.pickIndex("x", count: 3) == nil)
-        #expect(RoomQuery.pickIndex(nil, count: 3) == nil)
-        #expect(RoomQuery.pickIndex("1", count: 0) == nil)
+    @Test func commandWordsNormaliseAndOnlyJSONListingCapturesPanes() {
+        #expect(CLICommand(word: "ls") == .list && CLICommand(word: "list") == .list)
+        #expect(CLICommand(word: "attach") == .attach && CLICommand(word: "a") == .attach)
+        #expect(CLICommand(word: "billing") == nil && CLICommand(word: "--json") == nil)
+        #expect(CLICommand.list.capturesPaneState(json: true))
+        #expect(!CLICommand.list.capturesPaneState(json: false))
+        #expect(!CLICommand.attach.capturesPaneState(json: true))
+        #expect(!CLICommand.attach.capturesPaneState(json: false))
     }
 
     @Test func attachTargetsTheSessionIDOutsideTmux() throws {
@@ -144,7 +147,7 @@ struct RoomQueryTests {
     @Test func tableAlignsColumnsAcrossWideHangul() {
         let all = rooms(
             [
-                room("$1", name: "omx-app-1", activity: 1_700_000_200, paths: ["/Users/fixture/Projects/app"]),
+                room("$1", name: "codex-app-1", activity: 1_700_000_200, paths: ["/Users/fixture/Projects/app"]),
                 room("$2", name: "shell", activity: 1_700_000_100, paths: ["/tmp"], clients: [client("x"), client("y", readOnly: true)]),
             ],
             presence: ["$1": .named(.claude, "배포 경계")]
@@ -159,7 +162,7 @@ struct RoomQueryTests {
         }
         #expect(Set(starts).count == 1)
         #expect(lines[1].contains("~/Projects/app"))
-        #expect(lines[1].hasSuffix("omx-app-1"))
+        #expect(lines[1].hasSuffix("codex-app-1"))
         #expect(lines[2].contains("1 (+1 ro)"))
         #expect(lines[2].hasSuffix("-"))
     }
@@ -182,7 +185,7 @@ struct RoomQueryTests {
         let all = rooms(
             [
                 room("$1", name: "plain", clients: [client("x")]),
-                room("$2", name: "omx-app", activity: 1_700_000_000),
+                room("$2", name: "codex-app", activity: 1_700_000_000),
             ],
             presence: ["$2": .detected(.codex)]
         )
@@ -190,18 +193,79 @@ struct RoomQueryTests {
         let agent = RoomFormat.chooserLine(index: 2, room: all[1], home: "/Users/fixture", timeZone: utc)
         #expect(plain.hasSuffix("[attached]"))
         #expect(plain.components(separatedBy: "plain").count == 2)
-        #expect(agent.contains("Codex") && agent.contains("omx-app"))
+        #expect(agent.contains("Codex") && agent.contains("codex-app"))
     }
 
     @Test func jsonCarriesTheRoomFields() throws {
-        let all = rooms([room("$1", name: "omx-app")], presence: ["$1": .named(.codex, "작업")])
+        let all = rooms([room("$1", name: "codex-app")], presence: ["$1": .named(.codex, "작업")])
         let text = try RoomFormat.json(all)
         let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
         #expect(decoded.count == 1)
         #expect(decoded[0]["id"] as? String == "$1")
-        #expect(decoded[0]["name"] as? String == "omx-app")
+        #expect(decoded[0]["name"] as? String == "codex-app")
         #expect(decoded[0]["title"] as? String == "작업")
         #expect(decoded[0]["agent"] as? String == "codex")
         #expect(decoded[0]["paths"] as? [String] == ["/Users/fixture/Projects/app"])
+    }
+
+    @Test func jsonWritesARoomWithoutAnAgentAsAnExplicitNull() throws {
+        let text = try RoomFormat.json(rooms([room("$1", name: "plain")]))
+        let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        #expect(decoded[0].keys.contains("agent"))
+        #expect(decoded[0]["agent"] is NSNull)
+    }
+
+    @Test func jsonCarriesLivePaneTargetsAndExplicitUnknownFields() throws {
+        let source = room("$1", name: "work", paths: ["/p/one", "/p/two"])
+        let named = PaneAgentInfo(
+            kind: .codex, pid: 73965, sessionID: "thread-1", name: "작업", state: .busy
+        )
+        let all = rooms([source], presence: ["$1": .named(.codex, "작업")], panes: ["%0": named])
+        let text = try RoomFormat.json(all)
+        let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        let paneJSON = try #require(decoded[0]["panes"] as? [[String: Any]])
+        #expect(paneJSON.count == 2)
+        #expect(paneJSON[0]["paneId"] as? String == "%0")
+        #expect(paneJSON[0]["target"] as? String == "work:2.3")
+        #expect(paneJSON[0]["active"] as? Bool == true)
+        #expect(paneJSON[0]["path"] as? String == "/p/one")
+        #expect(paneJSON[0]["agent"] as? String == "codex")
+        #expect(paneJSON[0]["pid"] as? Int == 73965)
+        #expect(paneJSON[0]["sessionId"] as? String == "thread-1")
+        #expect(paneJSON[0]["name"] as? String == "작업")
+        #expect(paneJSON[0]["state"] as? String == "busy")
+        #expect(paneJSON[1]["target"] as? String == "work:2.4")
+        #expect(paneJSON[1]["agent"] is NSNull)
+        #expect(paneJSON[1]["pid"] as? Int == 201)
+        #expect(paneJSON[1]["sessionId"] is NSNull)
+        #expect(paneJSON[1]["name"] is NSNull)
+        #expect(paneJSON[1]["state"] as? String == "unknown")
+    }
+
+    @Test func textOutputCarriesNoControlCharactersButJSONKeepsThemEscaped() throws {
+        let hostile = "\u{1B}]52;c;ZXZpbA==\u{07}"
+        let source = room("$1", name: "tmux\u{9B}2J", paths: ["/p/\(hostile)dir"])
+        let all = rooms([source], presence: ["$1": .named(.codex, "title\(hostile)\n")])
+        let outputs = [
+            RoomFormat.table(all, home: "/Users/fixture", timeZone: utc),
+            RoomFormat.chooserLine(index: 1, room: all[0], home: "/Users/fixture", timeZone: utc),
+            RoomFormat.chooserDetail(all[0]),
+        ] + RoomFormat.chooserRows(all, home: "/Users/fixture", timeZone: utc)
+        for output in outputs {
+            #expect(!output.unicodeScalars.contains { $0.value < 0x20 && $0 != "\n" || (0x7F...0x9F).contains($0.value) })
+        }
+        #expect(outputs[0].contains("/p/]52;c;ZXZpbA==dir") && outputs[0].contains("tmux2J"))
+        let json = try RoomFormat.json(all)
+        #expect(json.contains("\\u001b]52") && !json.unicodeScalars.contains("\u{1B}"))
+    }
+
+    @Test func deadPanesAreNotIncludedInJSON() throws {
+        let live = SessionRoom.Pane(windowID: "@1", paneID: "%1", panePID: 101, currentPath: "/live", title: "", currentCommand: "zsh", isActive: true, isDead: false, windowIndex: 1, paneIndex: 0)
+        let dead = SessionRoom.Pane(windowID: "@1", paneID: "%2", panePID: 102, currentPath: "/dead", title: "", currentCommand: "zsh", isActive: false, isDead: true, windowIndex: 1, paneIndex: 1)
+        let source = SessionRoom(token: SessionToken(server: server, sessionID: "$1", createdAtUnixSeconds: 1), name: "work", lastActivityAtUnixSeconds: 2, panes: [live, dead], clients: [])
+        let text = try RoomFormat.json(rooms([source]))
+        let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        let paneJSON = try #require(decoded[0]["panes"] as? [[String: Any]])
+        #expect(paneJSON.map { $0["paneId"] as? String } == ["%1"])
     }
 }

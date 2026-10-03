@@ -12,9 +12,9 @@ import Foundation
 public protocol ProcessLivenessProbing: Sendable {
     /// `true` only when the process is proven gone.
     ///
-    /// Anything uncertain — including a PID that exists but is owned by another
-    /// user, and therefore may be a reuse of the recorded number — must answer
-    /// `false` so the caller keeps taking the ownership-verifying slow path.
+    /// Anything uncertain must answer `false`, including a PID that exists but
+    /// is owned by another user and therefore may be a reuse of the recorded
+    /// number, so the caller keeps taking the ownership-verifying slow path.
     func isDefinitelyDead(_ pid: Int32) -> Bool
 }
 

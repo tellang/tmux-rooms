@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TmuxRoomsCore
 
-@Suite("T7 room action policy", .serialized)
+@Suite("room action policy", .serialized)
 @MainActor
 struct TmuxControllerActionTests {
     @Test("Open revalidates detached, sole, and chosen route provenance")
@@ -100,7 +100,7 @@ struct TmuxControllerActionTests {
         let terminal = DeferredDuplicateTerminal(token: fresh.rooms[0].token)
         let loader = ActionSequenceLoader([fresh, fresh, fresh])
         let controller = TmuxController(
-            socketURL: URL(fileURLWithPath: "/tmp/t7-controller"),
+            socketURL: URL(fileURLWithPath: "/tmp/action-controller"),
             loader: loader,
             deleter: ActionNoopDeleter(),
             terminal: terminal,
@@ -127,7 +127,7 @@ struct TmuxControllerActionTests {
         let terminal = DelayedOwnershipTerminal(token: fresh.rooms[0].token, role: nil, completeOnReconcile: 4)
         let loader = ActionSequenceLoader(Array(repeating: fresh, count: 10))
         let controller = TmuxController(
-            socketURL: URL(fileURLWithPath: "/tmp/t7-controller"), loader: loader,
+            socketURL: URL(fileURLWithPath: "/tmp/action-controller"), loader: loader,
             deleter: ActionNoopDeleter(), terminal: terminal,
             terminalPolling: .init(interval: .milliseconds(20), deadline: .seconds(1))
         )
@@ -151,7 +151,7 @@ struct TmuxControllerActionTests {
         let terminal = DelayedOwnershipTerminal(token: fresh.rooms[0].token, role: .preview, completeOnReconcile: 3)
         let loader = ActionSequenceLoader(Array(repeating: fresh, count: 8))
         let controller = TmuxController(
-            socketURL: URL(fileURLWithPath: "/tmp/t7-controller"), loader: loader,
+            socketURL: URL(fileURLWithPath: "/tmp/action-controller"), loader: loader,
             deleter: ActionNoopDeleter(), terminal: terminal,
             terminalPolling: .init(interval: .milliseconds(5), deadline: .seconds(1))
         )
@@ -341,7 +341,7 @@ private final class DelayedOwnershipTerminal: TerminalControlling {
 @MainActor
 private func makeActionController(loader: ActionSequenceLoader, terminal: FakeActionTerminal) -> TmuxController {
     TmuxController(
-        socketURL: URL(fileURLWithPath: "/tmp/t7-controller"),
+        socketURL: URL(fileURLWithPath: "/tmp/action-controller"),
         loader: loader,
         deleter: ActionNoopDeleter(),
         terminal: terminal,
@@ -354,7 +354,7 @@ private struct ActionNoopDeleter: TmuxDeleting {
 }
 
 private func actionSnapshot(interactiveCount: Int) -> RoomSnapshot {
-    let server = ServerIdentity(canonicalSocketPath: "/tmp/t7-controller", socketDevice: 1, socketInode: 2, serverPID: 3, startedAtUnixSeconds: 4)
+    let server = ServerIdentity(canonicalSocketPath: "/tmp/action-controller", socketDevice: 1, socketInode: 2, serverPID: 3, startedAtUnixSeconds: 4)
     let token = SessionToken(server: server, sessionID: "$1", createdAtUnixSeconds: 5)
     let clients = (0..<interactiveCount).map { index in
         let key = ClientKey(server: server, clientName: "client-\(index)", tty: "/dev/ttys\(index)", clientPID: Int32(20 + index), createdAtUnixSeconds: Int64(30 + index))

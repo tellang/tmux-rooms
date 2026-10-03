@@ -287,8 +287,8 @@ func focusPathsDoNotReEnumerate() async throws {
     #expect(try await controller.focus(clientKey: managedKey, snapshot: snapshot) == .managed(try #require(try journal.read(nonce: nonce))))
     #expect(automation.enumerateManagedCalls == 0)
 
-    // The pass that establishes ownership still enumerates. Only the two calls
-    // that used to repeat it stopped.
+    // The pass that establishes ownership enumerates; focusability and focus
+    // read the journal instead.
     _ = try await controller.reconcile(snapshot: snapshot)
     #expect(automation.enumerateManagedCalls == 1)
 }
@@ -570,9 +570,8 @@ func previewLaunchCarriesRoomTitle() async throws {
     let reconciled = try await controller.reconcile(snapshot: snapshot)
     #expect(reconciled.first?.state == .complete)
     #expect(fake.titleUpdates.first?.2 == "READ ONLY · ops \\\"blue\\\" \\\\ desk")
-    // The pass requests the title and stops there. Waiting for iTerm to apply
-    // it is what used to freeze the app, so the marker only clears once a
-    // later pass confirms it.
+    // The pass requests the title and stops there without waiting for iTerm,
+    // so the marker only clears once a later pass confirms it.
     #expect(try journal.read(nonce: configuration.nonce)?.pendingPreviewTitle != nil)
     #expect(try journal.read(nonce: configuration.nonce)?.pendingTitleRequestID != nil)
     #expect(fake.titleConfirmations.isEmpty)

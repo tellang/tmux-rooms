@@ -1,6 +1,19 @@
 import Foundation
 import TmuxRoomsCore
 
+/// One live pane and the agent session the probe could prove inside it.
+struct CLIPane: Equatable, Sendable {
+    let paneId: String
+    let target: String
+    let active: Bool
+    let path: String
+    let agent: AgentKind?
+    let pid: Int32
+    let sessionId: String?
+    let name: String?
+    let state: AgentActivityState
+}
+
 /// One room as the command line prints it: the tmux room joined with the label
 /// the menu-bar app would give it.
 struct CLIRoom: Equatable, Sendable {
@@ -12,6 +25,7 @@ struct CLIRoom: Equatable, Sendable {
     let interactiveClients: Int
     let readOnlyClients: Int
     let lastActivityAtUnixSeconds: Int64
+    var panes: [CLIPane] = []
 
     /// `true` when the title is only the tmux name again, so printing both says
     /// nothing new.
@@ -20,12 +34,30 @@ struct CLIRoom: Equatable, Sendable {
 
 enum RoomQuery {
     /// Joins every room with its agent label, most recently active first.
-    static func rooms(from snapshot: RoomSnapshot, presence: [String: AgentPresence]) -> [CLIRoom] {
+    static func rooms(
+        from snapshot: RoomSnapshot,
+        presence: [String: AgentPresence],
+        panes paneInfo: [String: PaneAgentInfo] = [:]
+    ) -> [CLIRoom] {
         snapshot.rooms.map { room in
             let found = presence[room.token.sessionID] ?? .absent
             var paths: [String] = []
             for pane in room.panes where !paths.contains(pane.currentPath) {
                 paths.append(pane.currentPath)
+            }
+            let livePanes = room.panes.filter { !$0.isDead }.map { pane in
+                let info = paneInfo[pane.paneID]
+                return CLIPane(
+                    paneId: pane.paneID,
+                    target: "\(room.name):\(pane.windowIndex).\(pane.paneIndex)",
+                    active: pane.isActive,
+                    path: pane.currentPath,
+                    agent: info?.kind,
+                    pid: info?.pid ?? pane.panePID,
+                    sessionId: info?.sessionID,
+                    name: info?.name,
+                    state: info?.state ?? .unknown
+                )
             }
             return CLIRoom(
                 sessionID: room.token.sessionID,
@@ -35,7 +67,8 @@ enum RoomQuery {
                 paths: paths,
                 interactiveClients: room.interactiveClients.count,
                 readOnlyClients: room.readOnlyClients.count,
-                lastActivityAtUnixSeconds: room.lastActivityAtUnixSeconds
+                lastActivityAtUnixSeconds: room.lastActivityAtUnixSeconds,
+                panes: livePanes
             )
         }
         .sorted { a, b in
@@ -71,16 +104,26 @@ enum RoomQuery {
     static func initialCursor(_ rooms: [CLIRoom], directory: String) -> Int {
         rooms.firstIndex { $0.paths.contains(directory) } ?? 0
     }
+}
 
-    /// Reads a 1-based chooser answer and returns the 0-based index it names,
-    /// or `nil` for an empty, non-numeric, or out-of-range answer.
-    static func pickIndex(_ answer: String?, count: Int) -> Int? {
-        guard count > 0,
-              let answer = answer?.trimmingCharacters(in: .whitespaces),
-              let number = Int(answer),
-              (1...count).contains(number)
-        else { return nil }
-        return number - 1
+/// The command word, with its aliases folded so every later decision reads
+/// one spelling.
+enum CLICommand: Equatable {
+    case list
+    case attach
+
+    init?(word: String) {
+        switch word {
+        case "ls", "list": self = .list
+        case "attach", "a": self = .attach
+        default: return nil
+        }
+    }
+
+    /// Screen captures cost a subprocess per agent pane, and only the JSON
+    /// listing prints pane state.
+    func capturesPaneState(json: Bool) -> Bool {
+        self == .list && json
     }
 }
 

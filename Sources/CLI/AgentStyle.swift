@@ -29,9 +29,8 @@ struct AgentColor: Equatable {
 
 /// What tells one coding agent's room from another's: a short tag and a color.
 enum AgentStyle {
-    /// The colors triflux uses for these agents in its HUD (`hud/colors.mjs`), so a
-    /// room reads the same here as there. Antigravity is grouped with Gemini in the
-    /// HUD, so `agy` takes Gemini's blue.
+    /// Each agent keeps one recognisable color: Claude orange, Codex white, and
+    /// Gemini's blue for Antigravity.
     ///
     /// The values are written out rather than computed. Rounding the orange to the
     /// nearest cell of the 256-color cube lands on a pinkish red, so the fallback
