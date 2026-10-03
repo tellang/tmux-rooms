@@ -4,19 +4,32 @@ import Testing
 
 private actor AgentFixtureRunner: TmuxCommandRunning {
     var invocations: [TmuxCommandInvocation] = []
+    var capturesInFlight = 0
+    var mostCapturesInFlight = 0
     let ps: String
     let lsof: String
     let screen: String
     let failCapture: Bool
-    init(ps: String, lsof: String = "", screen: String = "Ready", failCapture: Bool = false) {
+    let lsofExit: Int32
+    let captureExit: Int32
+    let captureDelay: Duration?
+    init(ps: String, lsof: String = "", screen: String = "Ready", failCapture: Bool = false, lsofExit: Int32 = 0, captureExit: Int32 = 0, captureDelay: Duration? = nil) {
         self.ps = ps; self.lsof = lsof; self.screen = screen; self.failCapture = failCapture
+        self.lsofExit = lsofExit; self.captureExit = captureExit; self.captureDelay = captureDelay
     }
     func run(_ invocation: TmuxCommandInvocation) async throws -> TmuxCommandOutput {
         invocations.append(invocation)
         let executable = invocation.executableURL.lastPathComponent
-        if executable == "tmux", failCapture { throw TmuxFailure.timedOut }
+        if executable == "tmux" {
+            if failCapture { throw TmuxFailure.timedOut }
+            capturesInFlight += 1
+            mostCapturesInFlight = max(mostCapturesInFlight, capturesInFlight)
+            if let captureDelay { try await Task.sleep(for: captureDelay) }
+            capturesInFlight -= 1
+        }
         let text = executable == "ps" ? ps : executable == "lsof" ? lsof : screen
-        return TmuxCommandOutput(exitCode: 0, termination: .exit, stdout: Data(text.utf8), stderr: Data())
+        let exitCode = executable == "lsof" ? lsofExit : executable == "tmux" ? captureExit : 0
+        return TmuxCommandOutput(exitCode: exitCode, termination: .exit, stdout: Data(text.utf8), stderr: Data())
     }
 }
 
@@ -33,9 +46,13 @@ private struct AgentFixture {
     func probe(_ runner: AgentFixtureRunner, lsof: Bool = false) -> AgentPresenceProbe {
         AgentPresenceProbe(runner: runner, registryDirectory: root.appending(path: "claude"), projectsDirectory: nil, codexRegistryDirectory: registry, codexHome: codexHome, homeDirectory: root, socketPath: "/fixture/tmux.sock", allowLsofFallback: lsof)
     }
-    var room: SessionRoom {
+    var room: SessionRoom { room(panes: [(paneID: "%228", panePID: 100)]) }
+    func room(panes: [(paneID: String, panePID: Int32)]) -> SessionRoom {
         let server = ServerIdentity(canonicalSocketPath: "/fixture/tmux.sock", socketDevice: 1, socketInode: 2, serverPID: 3, startedAtUnixSeconds: 4)
-        return SessionRoom(token: SessionToken(server: server, sessionID: "$0", createdAtUnixSeconds: 5), name: "room", lastActivityAtUnixSeconds: 6, panes: [SessionRoom.Pane(windowID: "@0", paneID: "%228", panePID: 100, currentPath: checkout.path, title: "", currentCommand: "node", isActive: true, isDead: false)], clients: [])
+        let panes = panes.enumerated().map { index, pane in
+            SessionRoom.Pane(windowID: "@0", paneID: pane.paneID, panePID: pane.panePID, currentPath: checkout.path, title: "", currentCommand: "node", isActive: index == 0, isDead: false)
+        }
+        return SessionRoom(token: SessionToken(server: server, sessionID: "$0", createdAtUnixSeconds: 5), name: "room", lastActivityAtUnixSeconds: 6, panes: panes, clients: [])
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
 }
@@ -65,7 +82,7 @@ func probeOMXFallbackAndCapture() async throws {
     #expect(result.presence["$0"] == .named(.codex, "OMX"))
     #expect(result.panes["%228"]?.state == .busy)
     let invocations = await runner.invocations
-    #expect(invocations.map { $0.executableURL.lastPathComponent } == ["ps", "tmux"])
+    #expect(invocations.map { $0.executableURL.lastPathComponent } == ["ps", "lsof", "tmux"])
     #expect(invocations.last?.arguments == ["-S", "/fixture/tmux.sock", "-N", "capture-pane", "-p", "-t", "%228"])
     #expect(invocations.last?.deadline == .seconds(1))
 }
@@ -131,4 +148,60 @@ func probeLsofResolvesSymlinkedCodexHome() async throws {
     let runner = AgentFixtureRunner(ps: "100 1 node\n102 100 codex", lsof: "n" + String(cString: resolved))
     let result = await fixture.probe(runner, lsof: true).inspect(for: [fixture.room])
     #expect(result.presence["$0"] == .named(.codex, "Linked"))
+}
+
+@Test("with lsof the open rollout outranks an OMX file left by /new or /resume")
+func probeRolloutOutranksOMX() async throws {
+    let fixture = try AgentFixture(); defer { fixture.remove() }
+    let rollout = fixture.codexHome.appending(path: "sessions/2026/10/03/rollout-current.jsonl")
+    try fixture.write("{\"id\":\"old\",\"thread_name\":\"Old\"}\n{\"id\":\"current\",\"thread_name\":\"Current\"}", to: fixture.codexHome.appending(path: "session_index.jsonl"))
+    try fixture.write(#"{"native_session_id":"old","pid":100,"tmux_pane_id":"%228"}"#, to: fixture.root.appending(path: "repo/.omx/state/session.json"))
+    try fixture.write(#"{"type":"session_meta","payload":{"id":"current","thread_source":"user"}}"#, to: rollout)
+    let runner = AgentFixtureRunner(ps: "100 1 node\n102 100 codex", lsof: "n" + rollout.path)
+    #expect(await fixture.probe(runner, lsof: true).inspect(for: [fixture.room]).presence["$0"] == .named(.codex, "Current"))
+    let app = AgentFixtureRunner(ps: "100 1 node\n102 100 codex", lsof: "n" + rollout.path)
+    #expect(await fixture.probe(app).inspect(for: [fixture.room]).presence["$0"] == .named(.codex, "Old"))
+    #expect(await app.invocations.map { $0.executableURL.lastPathComponent } == ["ps"])
+}
+
+@Test("lsof exiting 1, an unnamed rollout, and capture exiting 1 leave Codex detected and unknown")
+func probeCommandFailuresStayUnknown() async throws {
+    let fixture = try AgentFixture(); defer { fixture.remove() }
+    let rollout = fixture.codexHome.appending(path: "sessions/2026/10/03/rollout-unnamed.jsonl")
+    try fixture.write(#"{"id":"other","thread_name":"Other"}"#, to: fixture.codexHome.appending(path: "session_index.jsonl"))
+    try fixture.write(#"{"type":"session_meta","payload":{"id":"unnamed","thread_source":"user"}}"#, to: rollout)
+    let runners = [
+        AgentFixtureRunner(ps: "100 1 node\n102 100 codex", lsof: "n" + rollout.path, screen: "» Ask Codex to do anything", lsofExit: 1, captureExit: 1),
+        AgentFixtureRunner(ps: "100 1 node\n102 100 codex", lsof: "n" + rollout.path, screen: "Ready"),
+        AgentFixtureRunner(ps: "100 1 node\n102 100 codex", lsof: "n" + rollout.path, screen: "» Ask Codex to do anything", captureExit: 1),
+    ]
+    for runner in runners {
+        let result = await fixture.probe(runner, lsof: true).inspect(for: [fixture.room], capturePaneState: true)
+        #expect(result.presence["$0"] == .detected(.codex))
+        #expect(result.panes["%228"]?.state == .unknown && result.panes["%228"]?.name == nil)
+    }
+}
+
+@Test("a Claude pane keeps its registry state and is never captured")
+func probeClaudeStateSkipsCapture() async throws {
+    let fixture = try AgentFixture(); defer { fixture.remove() }
+    try fixture.write(#"{"pid":102,"name":"Claude work","tmux":"room:@0.%228","status":"busy"}"#, to: fixture.root.appending(path: "claude/102.json"))
+    let runner = AgentFixtureRunner(ps: "100 1 zsh\n102 100 claude", screen: "» idle-looking prompt")
+    let result = await fixture.probe(runner, lsof: true).inspect(for: [fixture.room], capturePaneState: true)
+    #expect(result.presence["$0"] == .named(.claude, "Claude work"))
+    #expect(result.panes["%228"]?.state == .busy && result.panes["%228"]?.pid == 102)
+    #expect(await runner.invocations.map { $0.executableURL.lastPathComponent } == ["ps"])
+}
+
+@Test("pane captures run at most four at a time and every pane is answered")
+func probeBoundsPaneConcurrency() async throws {
+    let fixture = try AgentFixture(); defer { fixture.remove() }
+    let panes = (0..<7).map { (paneID: "%\(300 + $0)", panePID: Int32(300 + $0 * 10)) }
+    let ps = panes.map { "\($0.panePID) 1 zsh\n\($0.panePID + 1) \($0.panePID) codex" }.joined(separator: "\n")
+    let runner = AgentFixtureRunner(ps: ps, screen: "Working (esc to interrupt)", captureDelay: .milliseconds(50))
+    let result = await fixture.probe(runner).inspect(for: [fixture.room(panes: panes)], capturePaneState: true)
+    #expect(result.panes.count == panes.count)
+    #expect(panes.allSatisfy { result.panes[$0.paneID]?.state == .busy && result.panes[$0.paneID]?.pid == $0.panePID + 1 })
+    let most = await runner.mostCapturesInFlight
+    #expect(most > 1 && most <= AgentPresenceProbe.paneConcurrency)
 }

@@ -52,7 +52,7 @@ public enum CodexSessionRegistry {
     public static func record(fromJSON data: Data, names: [String: String]) -> AgentSessionRecord? {
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
               payload.version == 1, payload.writer == "triflux", payload.pid > 0,
-              let name = names[payload.sessionId], !name.isEmpty else { return nil }
+              let name = names[payload.sessionId]?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
         let coordinate = payload.tmux.flatMap(TmuxPaneCoordinate.init)
         guard let paneID = coordinate?.paneID ?? payload.tmuxPane,
               paneID.first == "%", Int(paneID.dropFirst()).map({ $0 >= 0 }) == true else { return nil }

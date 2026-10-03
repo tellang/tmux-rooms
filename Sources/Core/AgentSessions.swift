@@ -243,19 +243,28 @@ public struct ProcessTable: Sendable, Hashable {
 
     /// Returns the executable's pid, not a shell or Node wrapper above it.
     public func agent(inTreeOf pid: Int32) -> (kind: AgentKind, pid: Int32)? {
-        for candidate in tree(of: pid) {
-            if let command = commands[candidate], let kind = AgentKind.matching(command: command) {
-                return (kind, candidate)
-            }
+        agent(among: tree(of: pid))
+    }
+
+    /// The first agent in an already walked tree, so a caller that needs the
+    /// tree for other checks walks it once.
+    func agent(among tree: [Int32]) -> (kind: AgentKind, pid: Int32)? {
+        for candidate in tree {
+            if let kind = kind(of: candidate) { return (kind, candidate) }
         }
         return nil
+    }
+
+    func kind(of pid: Int32) -> AgentKind? {
+        commands[pid].flatMap(AgentKind.matching(command:))
     }
 
     public func contains(_ candidate: Int32, inTreeOf pid: Int32) -> Bool {
         tree(of: pid).contains(candidate)
     }
 
-    private func tree(of pid: Int32) -> [Int32] {
+    /// The pane process and its descendants, breadth-first, to `searchDepth`.
+    func tree(of pid: Int32) -> [Int32] {
         var frontier = [pid]
         var visited: Set<Int32> = [pid]
         var result: [Int32] = []
@@ -288,9 +297,18 @@ public enum AgentPresenceResolver {
         records: [AgentSessionRecord],
         table: ProcessTable?
     ) -> AgentPresence {
+        var infos: [String: PaneAgentInfo] = [:]
+        for pane in room.panes where !pane.isDead {
+            infos[pane.paneID] = agent(for: pane, records: records, table: table)
+        }
+        return presence(for: room, infos: infos)
+    }
+
+    /// Resolves one room from pane results that are already known.
+    static func presence(for room: SessionRoom, infos: [String: PaneAgentInfo]) -> AgentPresence {
         var fallback: AgentPresence = .absent
         for pane in orderedPanes(of: room) {
-            let info = agent(for: pane, records: records, table: table)
+            guard let info = infos[pane.paneID] else { continue }
             if let kind = info.kind, let name = info.name { return .named(kind, name) }
             if case .absent = fallback, let kind = info.kind { fallback = .detected(kind) }
         }
@@ -300,25 +318,37 @@ public enum AgentPresenceResolver {
     /// The pane coordinate and bounded process ancestry must agree before a
     /// registry can enrich the pane. A process name alone supplies no state.
     public static func matchingRecord(for pane: SessionRoom.Pane, records: [AgentSessionRecord], table: ProcessTable?) -> AgentSessionRecord? {
+        matchingRecord(for: pane, records: records, table: table, tree: table?.tree(of: pane.panePID))
+    }
+
+    /// A record's pid must be in the pane's tree and still run the program the
+    /// record names, whether it is the pane process itself or a descendant.
+    /// When several records qualify, the one naming the shallowest agent wins,
+    /// then the first in record order, which follows sorted file names.
+    static func matchingRecord(for pane: SessionRoom.Pane, records: [AgentSessionRecord], table: ProcessTable?, tree: [Int32]?) -> AgentSessionRecord? {
         guard !pane.isDead else { return nil }
-        return records.first { record in
-            guard record.paneID == pane.paneID,
-                  record.pid == pane.panePID || table?.contains(record.pid, inTreeOf: pane.panePID) == true else { return false }
-            guard let table else { return true }
-            if record.pid == pane.panePID { return table.agentKind(inTreeOf: pane.panePID) == record.kind }
-            return table.command(of: record.pid).flatMap(AgentKind.matching(command:)) == record.kind
+        let candidates = records.filter { record in
+            guard record.paneID == pane.paneID else { return false }
+            guard let table, let tree else { return record.pid == pane.panePID }
+            return tree.contains(record.pid) && table.kind(of: record.pid) == record.kind
         }
+        guard candidates.count > 1, let tree, let shallowest = table?.agent(among: tree)?.pid else { return candidates.first }
+        return candidates.first { $0.pid == shallowest } ?? candidates.first
     }
 
     public static func agent(for pane: SessionRoom.Pane, records: [AgentSessionRecord], table: ProcessTable?) -> PaneAgentInfo {
+        agent(for: pane, records: records, table: table, tree: table?.tree(of: pane.panePID))
+    }
+
+    static func agent(for pane: SessionRoom.Pane, records: [AgentSessionRecord], table: ProcessTable?, tree: [Int32]?) -> PaneAgentInfo {
         guard !pane.isDead else { return PaneAgentInfo(kind: nil, pid: pane.panePID) }
-        if let record = matchingRecord(for: pane, records: records, table: table) {
-            return PaneAgentInfo(kind: record.kind, pid: record.pid == pane.panePID ? (table?.agent(inTreeOf: pane.panePID)?.pid ?? record.pid) : record.pid,
+        if let record = matchingRecord(for: pane, records: records, table: table, tree: tree) {
+            return PaneAgentInfo(kind: record.kind, pid: record.pid,
                                  sessionID: record.sessionID.isEmpty ? nil : record.sessionID,
                                  name: record.nameIsDerived ? nil : record.name,
                                  state: record.state)
         }
-        let found = table?.agent(inTreeOf: pane.panePID)
+        let found = tree.flatMap { table?.agent(among: $0) }
         return PaneAgentInfo(kind: found?.kind, pid: found?.pid ?? pane.panePID)
     }
 

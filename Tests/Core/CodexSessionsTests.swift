@@ -26,6 +26,33 @@ func codexRegistryParsing() throws {
     #expect(fallback?.paneID == "%228" && fallback?.tmuxSessionName == nil)
 }
 
+@Test("registry payloads with a foreign writer, bad pid, or bad pane are refused")
+func codexRegistryRejections() {
+    let names = ["t": "제목", "blank": "  "]
+    func record(_ json: String) -> AgentSessionRecord? { CodexSessionRegistry.record(fromJSON: Data(json.utf8), names: names) }
+    #expect(record(#"{"version":1,"writer":"triflux","pid":102,"sessionId":"t","tmuxPane":"%228"}"#) != nil)
+    #expect(record(#"{"version":1,"writer":"other","pid":102,"sessionId":"t","tmuxPane":"%228"}"#) == nil)
+    #expect(record(#"{"version":1,"writer":"triflux","pid":0,"sessionId":"t","tmuxPane":"%228"}"#) == nil)
+    #expect(record(#"{"version":1,"writer":"triflux","pid":-1,"sessionId":"t","tmuxPane":"%228"}"#) == nil)
+    #expect(record(#"{"version":1,"writer":"triflux","pid":102,"sessionId":"t","tmuxPane":"abc"}"#) == nil)
+    #expect(record(#"{"version":1,"writer":"triflux","pid":102,"sessionId":"t","tmuxPane":"%"}"#) == nil)
+    #expect(record(#"{"version":1,"writer":"triflux","pid":102,"sessionId":"t"}"#) == nil)
+    #expect(record(#"{"version":1,"writer":"triflux","pid":102,"sessionId":"blank","tmuxPane":"%228"}"#) == nil)
+}
+
+@Test("a registry scan tolerates a missing directory and skips non-JSON files")
+func codexRegistryScan() throws {
+    let missing = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "absent-\(UUID().uuidString)")
+    #expect(CodexSessionRegistry.records(in: missing, names: ["t": "제목"]).isEmpty)
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "codex-registry-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let json = Data(#"{"version":1,"writer":"triflux","pid":102,"sessionId":"t","tmuxPane":"%228"}"#.utf8)
+    try json.write(to: directory.appending(path: "102.json"))
+    try json.write(to: directory.appending(path: "103.txt"))
+    #expect(CodexSessionRegistry.records(in: directory, names: ["t": "제목"]).map(\.pid) == [102])
+}
+
 @Test("OMX only supplies a name for its exact pane and uses the native agent pid")
 func codexOMXParsing() {
     let json = Data(#"{"native_session_id":"t","pid":100,"tmux_pane_id":"%228","tmux_session_name":"room"}"#.utf8)

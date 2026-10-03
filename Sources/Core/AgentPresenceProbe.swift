@@ -10,6 +10,9 @@ public protocol AgentPresenceProbing: Sendable {
 }
 
 public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
+    /// How many panes run their lsof and capture-pane commands at once.
+    static let paneConcurrency = 4
+
     private let runner: any TmuxCommandRunning
     private let registryDirectory: URL
     private let projectsDirectory: URL?
@@ -17,6 +20,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
     private let codexHome: URL
     private let homeDirectory: URL
     private let psExecutableURL: URL
+    private let lsofExecutableURL: URL
     private let tmuxExecutableURL: URL
     private let socketPath: String?
     private let allowLsofFallback: Bool
@@ -25,6 +29,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
         runner: any TmuxCommandRunning = ProcessTmuxCommandRunner(),
         registryDirectory: URL = ClaudeSessionRegistry.defaultDirectory,
         psExecutableURL: URL = URL(fileURLWithPath: "/bin/ps"),
+        lsofExecutableURL: URL = URL(fileURLWithPath: "/usr/sbin/lsof"),
         projectsDirectory: URL? = ClaudeConversationTitles.defaultProjectsDirectory,
         codexRegistryDirectory: URL = CodexSessionRegistry.defaultDirectory(),
         codexHome: URL = CodexSessionIndex.defaultHome(),
@@ -36,6 +41,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
         self.runner = runner
         self.registryDirectory = registryDirectory
         self.psExecutableURL = psExecutableURL
+        self.lsofExecutableURL = lsofExecutableURL
         self.projectsDirectory = projectsDirectory
         self.codexRegistryDirectory = codexRegistryDirectory
         self.codexHome = codexHome
@@ -55,57 +61,81 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
     public func inspect(for rooms: [SessionRoom], capturePaneState: Bool = false) async -> AgentProbeSnapshot {
         guard !rooms.isEmpty else { return AgentProbeSnapshot(presence: [:], panes: [:]) }
         let names = CodexSessionIndex.names(in: codexHome)
-        var records = ClaudeSessionRegistry.records(in: registryDirectory, projectsDirectory: projectsDirectory)
-        records += CodexSessionRegistry.records(in: codexRegistryDirectory, names: names)
+        let records = ClaudeSessionRegistry.records(in: registryDirectory, projectsDirectory: projectsDirectory)
+            + CodexSessionRegistry.records(in: codexRegistryDirectory, names: names)
         let table = await processTable()
-        let live = rooms.flatMap(\.panes).filter { !$0.isDead }
+        var seen: Set<String> = []
+        let live = rooms.flatMap(\.panes).filter { !$0.isDead && seen.insert($0.paneID).inserted }
+        // Results are keyed by pane, so completion order cannot change them.
         var infos: [String: PaneAgentInfo] = [:]
-        for pane in live where infos[pane.paneID] == nil {
-            if let table, let found = table.agent(inTreeOf: pane.panePID), found.kind == .codex,
-               AgentPresenceResolver.matchingRecord(for: pane, records: records, table: table) == nil {
-                if let record = CodexOMXSession.record(for: pane, nativePID: found.pid, names: names, homeDirectory: homeDirectory, table: table) {
-                    records.append(record)
-                } else if allowLsofFallback, let record = await rolloutRecord(for: pane, nativePID: found.pid, names: names) {
-                    records.append(record)
-                }
+        await withTaskGroup(of: (String, PaneAgentInfo).self) { group in
+            var next = 0
+            func enqueue() {
+                guard next < live.count else { return }
+                let pane = live[next]
+                next += 1
+                group.addTask { (pane.paneID, await inspect(pane, records: records, table: table, names: names, capturePaneState: capturePaneState)) }
             }
-            var info = AgentPresenceResolver.agent(for: pane, records: records, table: table)
-            if capturePaneState, let kind = info.kind, kind == .codex || kind == .agy {
-                let state = await screenState(paneID: pane.paneID, kind: kind)
-                info = PaneAgentInfo(kind: info.kind, pid: info.pid, sessionID: info.sessionID, name: info.name, state: state)
+            for _ in 0..<Self.paneConcurrency { enqueue() }
+            for await (paneID, info) in group {
+                infos[paneID] = info
+                enqueue()
             }
-            infos[pane.paneID] = info
         }
-        return AgentProbeSnapshot(presence: AgentPresenceResolver.presence(for: rooms, records: records, table: table), panes: infos)
+        var presence: [String: AgentPresence] = [:]
+        for room in rooms {
+            let found = AgentPresenceResolver.presence(for: room, infos: infos)
+            if found != .absent { presence[room.token.sessionID] = found }
+        }
+        return AgentProbeSnapshot(presence: presence, panes: infos)
+    }
+
+    /// One pane's agent. The process tree is walked once and shared by the
+    /// record match, the Codex fallbacks, and the final answer.
+    private func inspect(_ pane: SessionRoom.Pane, records: [AgentSessionRecord], table: ProcessTable?, names: [String: String], capturePaneState: Bool) async -> PaneAgentInfo {
+        let tree = table?.tree(of: pane.panePID)
+        var records = records
+        if let table, let tree, let found = table.agent(among: tree), found.kind == .codex,
+           AgentPresenceResolver.matchingRecord(for: pane, records: records, table: table, tree: tree) == nil,
+           let record = await codexFallbackRecord(for: pane, nativePID: found.pid, names: names, table: table) {
+            records.append(record)
+        }
+        let info = AgentPresenceResolver.agent(for: pane, records: records, table: table, tree: tree)
+        guard capturePaneState, let kind = info.kind, kind == .codex || kind == .agy else { return info }
+        let state = await screenState(paneID: pane.paneID, kind: kind)
+        return PaneAgentInfo(kind: info.kind, pid: info.pid, sessionID: info.sessionID, name: info.name, state: state)
+    }
+
+    /// The rollout the Codex process holds open is its current thread, so it
+    /// outranks an OMX file that a `/new` or `/resume` has left behind. The
+    /// menu-bar refresh never runs lsof and reads OMX alone.
+    private func codexFallbackRecord(for pane: SessionRoom.Pane, nativePID: Int32, names: [String: String], table: ProcessTable) async -> AgentSessionRecord? {
+        if allowLsofFallback, let record = await rolloutRecord(for: pane, nativePID: nativePID, names: names) { return record }
+        return CodexOMXSession.record(for: pane, nativePID: nativePID, names: names, homeDirectory: homeDirectory, table: table)
     }
 
     private func rolloutRecord(for pane: SessionRoom.Pane, nativePID: Int32, names: [String: String]) async -> AgentSessionRecord? {
-        let invocation = TmuxCommandInvocation(executableURL: URL(fileURLWithPath: "/usr/sbin/lsof"), arguments: ["-p", String(nativePID), "-Fn"], deadline: .seconds(1), stdoutLimit: 1_048_576, stderrLimit: 65_536)
-        guard let output = try? await runner.run(invocation), output.exitCode == 0, output.termination == .exit,
-              let id = CodexRolloutSession.sessionID(lsofOutput: String(decoding: output.stdout, as: UTF8.self), codexHome: codexHome),
+        guard let output = await output(of: lsofExecutableURL, ["-p", String(nativePID), "-Fn"]),
+              let id = CodexRolloutSession.sessionID(lsofOutput: output, codexHome: codexHome),
               let name = names[id] else { return nil }
         return AgentSessionRecord(kind: .codex, pid: nativePID, sessionID: id, name: name, nameIsDerived: false, paneID: pane.paneID, tmuxSessionName: nil, currentPath: pane.currentPath)
     }
 
     private func screenState(paneID: String, kind: AgentKind) async -> AgentActivityState {
         let endpoint = socketPath.map { ["-S", $0] } ?? []
-        let invocation = TmuxCommandInvocation(executableURL: tmuxExecutableURL, arguments: endpoint + ["-N", "capture-pane", "-p", "-t", paneID], deadline: .seconds(1), stdoutLimit: 1_048_576, stderrLimit: 65_536)
-        guard let output = try? await runner.run(invocation), output.exitCode == 0, output.termination == .exit else { return .unknown }
-        return .visibleScreen(String(decoding: output.stdout, as: UTF8.self), kind: kind)
+        guard let output = await output(of: tmuxExecutableURL, endpoint + ["-N", "capture-pane", "-p", "-t", paneID]) else { return .unknown }
+        return .visibleScreen(output, kind: kind)
     }
 
     private func processTable() async -> ProcessTable? {
-        let invocation = TmuxCommandInvocation(
-            executableURL: psExecutableURL,
-            arguments: ["-eo", "pid=,ppid=,comm="],
-            deadline: .seconds(3),
-            stdoutLimit: 4_194_304,
-            stderrLimit: 65_536
-        )
-        guard let output = try? await runner.run(invocation),
-              output.exitCode == 0,
-              case .exit = output.termination
-        else { return nil }
-        return ProcessTable(psOutput: String(decoding: output.stdout, as: UTF8.self))
+        guard let output = await output(of: psExecutableURL, ["-eo", "pid=,ppid=,comm="], deadline: .seconds(3), stdoutLimit: 4_194_304) else { return nil }
+        return ProcessTable(psOutput: output)
+    }
+
+    /// Runs one bounded helper command. Anything but a clean exit 0 is `nil`.
+    private func output(of executable: URL, _ arguments: [String], deadline: Duration = .seconds(1), stdoutLimit: Int = 1_048_576) async -> String? {
+        let invocation = TmuxCommandInvocation(executableURL: executable, arguments: arguments, deadline: deadline, stdoutLimit: stdoutLimit, stderrLimit: 65_536)
+        guard let output = try? await runner.run(invocation), output.exitCode == 0, output.termination == .exit else { return nil }
+        return String(decoding: output.stdout, as: UTF8.self)
     }
 }

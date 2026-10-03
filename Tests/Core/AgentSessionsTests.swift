@@ -374,3 +374,45 @@ func resolverNamesCodexDescendant() {
     #expect(AgentPresenceResolver.presence(for: other, records: [record], table: table) == .detected(.codex))
     #expect(AgentPresenceResolver.presence(for: subject, records: [record], table: nil) == .absent)
 }
+
+// MARK: - Record proof
+
+private func claudeRecord(pid: Int32, kind: AgentKind = .claude, paneID: String = "%184", name: String = "작업") -> AgentSessionRecord {
+    AgentSessionRecord(kind: kind, pid: pid, sessionID: "s\(pid)", name: name, nameIsDerived: false, paneID: paneID, tmuxSessionName: nil, currentPath: "")
+}
+
+@Test("a descendant pid now running a different program is refused")
+func matchingRefusesDescendantRunningOtherProgram() {
+    let table = ProcessTable(psOutput: "86980 4382 zsh\n86990 86980 zsh")
+    #expect(AgentPresenceResolver.matchingRecord(for: pane("%184", pid: 86980), records: [claudeRecord(pid: 86990)], table: table) == nil)
+}
+
+@Test("a record whose pid lives outside the pane's tree is refused")
+func matchingRefusesPIDOutsideTree() {
+    let table = ProcessTable(psOutput: "86980 4382 zsh\n99999 1 claude")
+    #expect(AgentPresenceResolver.matchingRecord(for: pane("%184", pid: 86980), records: [claudeRecord(pid: 99999)], table: table) == nil)
+}
+
+@Test("a record whose kind differs from the running program is refused")
+func matchingRefusesKindMismatch() {
+    let table = ProcessTable(psOutput: "86980 4382 zsh\n86990 86980 claude")
+    #expect(AgentPresenceResolver.matchingRecord(for: pane("%184", pid: 86980), records: [claudeRecord(pid: 86990, kind: .codex)], table: table) == nil)
+}
+
+@Test("a record naming the pane process is refused when that process is another program")
+func matchingRefusesPanePIDRunningOtherProgram() {
+    let subject = pane("%184", pid: 86980)
+    let table = ProcessTable(psOutput: "86980 4382 zsh\n86990 86980 claude")
+    #expect(AgentPresenceResolver.matchingRecord(for: subject, records: [claudeRecord(pid: 86980)], table: table) == nil)
+    let info = AgentPresenceResolver.agent(for: subject, records: [claudeRecord(pid: 86980)], table: table)
+    #expect(info.kind == .claude && info.pid == 86990 && info.name == nil)
+}
+
+@Test("of several proven records the one naming the shallowest agent wins")
+func matchingPrefersShallowestAgent() {
+    let table = ProcessTable(psOutput: "100 1 zsh\n101 100 codex\n102 101 codex")
+    let child = claudeRecord(pid: 102, kind: .codex, name: "Child")
+    let parent = claudeRecord(pid: 101, kind: .codex, name: "Parent")
+    #expect(AgentPresenceResolver.matchingRecord(for: pane("%184", pid: 100), records: [child, parent], table: table)?.name == "Parent")
+    #expect(AgentPresenceResolver.matchingRecord(for: pane("%184", pid: 100), records: [child], table: table)?.name == "Child")
+}
