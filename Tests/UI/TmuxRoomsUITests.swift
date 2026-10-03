@@ -165,10 +165,10 @@ final class TmuxRoomsUITests: XCTestCase {
         XCTAssertTrue(waitForExistence(title))
         XCTAssertTrue(text(of: title).contains("9.1 배포 경계"))
         XCTAssertTrue(waitForExistence(origin))
-        XCTAssertTrue(text(of: origin).contains("omc-tmux-rooms-core-v1-20260901023710"))
+        XCTAssertTrue(text(of: origin).contains("agent-20260901023710"))
         XCTAssertFalse(text(of: origin).contains("2.1.247"))
         XCTAssertTrue(waitUntilReady(button("room.\(id).open")))
-        XCTAssertEqual(button("room.\(id).open").label, "Open existing room omc-tmux-rooms-core-v1-20260901023710")
+        XCTAssertEqual(button("room.\(id).open").label, "Open existing room agent-20260901023710")
     }
 
     func testUnnamedAgentFallsBackToItsProductName() {
@@ -178,7 +178,7 @@ final class TmuxRoomsUITests: XCTestCase {
 
         XCTAssertTrue(waitForExistence(title))
         XCTAssertTrue(text(of: title).contains("Codex"))
-        XCTAssertTrue(text(of: textElement("room.\(id).origin")).contains("omc-projects-detached-20260826230948"))
+        XCTAssertTrue(text(of: textElement("room.\(id).origin")).contains("agent-detached-20260826230948"))
     }
 
     func testRecoveryAndTimeoutRetryPolicy() {

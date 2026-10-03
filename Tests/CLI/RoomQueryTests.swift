@@ -46,18 +46,18 @@ private func rooms(
 struct RoomQueryTests {
     @Test func agentLabelReplacesTmuxNameAndKeepsIt() {
         let result = rooms(
-            [room("$1", name: "omx-app-1790736413784-94242v")],
+            [room("$1", name: "codex-app-1790736413784-94242v")],
             presence: ["$1": .named(.claude, "9.1 배포 경계")]
         )
         #expect(result[0].title == "9.1 배포 경계")
-        #expect(result[0].tmuxName == "omx-app-1790736413784-94242v")
+        #expect(result[0].tmuxName == "codex-app-1790736413784-94242v")
         #expect(result[0].agent == .claude)
         #expect(!result[0].titleIsTmuxName)
     }
 
     @Test func detectedAgentIsLabelledByProductAndRoomWithoutAgentKeepsName() {
         let result = rooms(
-            [room("$1", name: "omx-app"), room("$2", name: "plain-shell", activity: 1_700_000_050)],
+            [room("$1", name: "codex-app"), room("$2", name: "plain-shell", activity: 1_700_000_050)],
             presence: ["$1": .detected(.codex)]
         )
         #expect(result.map(\.title) == ["Codex", "plain-shell"])
@@ -98,11 +98,11 @@ struct RoomQueryTests {
 
     @Test func textMatchesTitleNameAgentAndPathIgnoringCase() {
         let all = rooms(
-            [room("$1", name: "omx-app", paths: ["/p/Billing"]), room("$2", name: "misc", paths: ["/p/x"])],
+            [room("$1", name: "codex-app", paths: ["/p/Billing"]), room("$2", name: "misc", paths: ["/p/x"])],
             presence: ["$1": .named(.claude, "배포 경계")]
         )
         #expect(RoomQuery.filter(all, directory: nil, text: "배포").map(\.sessionID) == ["$1"])
-        #expect(RoomQuery.filter(all, directory: nil, text: "OMX").map(\.sessionID) == ["$1"])
+        #expect(RoomQuery.filter(all, directory: nil, text: "CODEX-APP").map(\.sessionID) == ["$1"])
         #expect(RoomQuery.filter(all, directory: nil, text: "claude").map(\.sessionID) == ["$1"])
         #expect(RoomQuery.filter(all, directory: nil, text: "billing").map(\.sessionID) == ["$1"])
         #expect(RoomQuery.filter(all, directory: nil, text: "nothing").isEmpty)
@@ -147,7 +147,7 @@ struct RoomQueryTests {
     @Test func tableAlignsColumnsAcrossWideHangul() {
         let all = rooms(
             [
-                room("$1", name: "omx-app-1", activity: 1_700_000_200, paths: ["/Users/fixture/Projects/app"]),
+                room("$1", name: "codex-app-1", activity: 1_700_000_200, paths: ["/Users/fixture/Projects/app"]),
                 room("$2", name: "shell", activity: 1_700_000_100, paths: ["/tmp"], clients: [client("x"), client("y", readOnly: true)]),
             ],
             presence: ["$1": .named(.claude, "배포 경계")]
@@ -162,7 +162,7 @@ struct RoomQueryTests {
         }
         #expect(Set(starts).count == 1)
         #expect(lines[1].contains("~/Projects/app"))
-        #expect(lines[1].hasSuffix("omx-app-1"))
+        #expect(lines[1].hasSuffix("codex-app-1"))
         #expect(lines[2].contains("1 (+1 ro)"))
         #expect(lines[2].hasSuffix("-"))
     }
@@ -185,7 +185,7 @@ struct RoomQueryTests {
         let all = rooms(
             [
                 room("$1", name: "plain", clients: [client("x")]),
-                room("$2", name: "omx-app", activity: 1_700_000_000),
+                room("$2", name: "codex-app", activity: 1_700_000_000),
             ],
             presence: ["$2": .detected(.codex)]
         )
@@ -193,16 +193,16 @@ struct RoomQueryTests {
         let agent = RoomFormat.chooserLine(index: 2, room: all[1], home: "/Users/fixture", timeZone: utc)
         #expect(plain.hasSuffix("[attached]"))
         #expect(plain.components(separatedBy: "plain").count == 2)
-        #expect(agent.contains("Codex") && agent.contains("omx-app"))
+        #expect(agent.contains("Codex") && agent.contains("codex-app"))
     }
 
     @Test func jsonCarriesTheRoomFields() throws {
-        let all = rooms([room("$1", name: "omx-app")], presence: ["$1": .named(.codex, "작업")])
+        let all = rooms([room("$1", name: "codex-app")], presence: ["$1": .named(.codex, "작업")])
         let text = try RoomFormat.json(all)
         let decoded = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
         #expect(decoded.count == 1)
         #expect(decoded[0]["id"] as? String == "$1")
-        #expect(decoded[0]["name"] as? String == "omx-app")
+        #expect(decoded[0]["name"] as? String == "codex-app")
         #expect(decoded[0]["title"] as? String == "작업")
         #expect(decoded[0]["agent"] as? String == "codex")
         #expect(decoded[0]["paths"] as? [String] == ["/Users/fixture/Projects/app"])

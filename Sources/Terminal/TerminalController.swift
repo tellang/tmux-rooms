@@ -342,9 +342,8 @@ public final class TerminalController: TerminalControlling {
     ///
     /// A pass either hands iTerm the title or checks once whether an earlier
     /// request landed. Both are a single Apple Event, and an Apple Event holds
-    /// the main thread for its whole round trip, so the old loop that waited
-    /// for the title to appear froze the window for seconds on every Preview.
-    /// The title is cosmetic; the wait was the only expensive part of it.
+    /// the main thread for its whole round trip, so a pass never waits for the
+    /// title to appear. The title is cosmetic and is not worth blocking on.
     private func advanceTitle(_ record: ManagedClientRecord, terminal: ManagedTerminalReference, title: String) async -> ManagedClientRecord {
         var record = record
         do {
@@ -387,8 +386,8 @@ public final class TerminalController: TerminalControlling {
     /// process is still holding.
     ///
     /// A record keeps naming its supervisor, child, and iTerm session long after
-    /// all three are gone — the window is closed, the tmux server restarts, the
-    /// machine reboots — and `reconcile()` re-reads those same PIDs out of the
+    /// all three are gone, when the window is closed, the tmux server restarts,
+    /// or the machine reboots, and `reconcile()` re-reads those same PIDs out of the
     /// handshake on every pass. Ownership therefore has to be proven by live
     /// processes, never by the mere presence of those fields.
     private func isProvablyGone(_ record: ManagedClientRecord, snapshot: RoomSnapshot) throws -> Bool {
@@ -407,7 +406,7 @@ public final class TerminalController: TerminalControlling {
 
     /// Closing a managed window is an ordinary thing to do. Once nothing the
     /// record names is left alive there is no ownership left to recover, so
-    /// retire it and let the caller launch a fresh client — otherwise the next
+    /// retire it and let the caller launch a fresh client. Otherwise the next
     /// Open or Preview parks the user in a recovery panel for good.
     private func retireIfProvablyGone(_ record: ManagedClientRecord, snapshot: RoomSnapshot) throws -> Bool {
         guard try isProvablyGone(record, snapshot: snapshot) else { return false }

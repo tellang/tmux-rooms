@@ -22,9 +22,7 @@ struct AgentStyleTests {
         #expect(AgentStyle.tag(for: nil) == "-")
     }
 
-    @Test func colorsAreTheOnesTheTfxHudUses() {
-        // hud/colors.mjs: CLAUDE_ORANGE, CODEX_WHITE, GEMINI_BLUE. Antigravity is
-        // grouped with Gemini in the HUD, so agy takes the same blue.
+    @Test func eachAgentKeepsItsColor() {
         #expect(AgentStyle.color(for: .claude)?.trueColor == "38;2;232;112;64")
         #expect(AgentStyle.color(for: .codex)?.trueColor == "97")
         #expect(AgentStyle.color(for: .agy)?.trueColor == "38;5;39")

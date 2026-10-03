@@ -12,11 +12,11 @@ private actor FakeRunner: TmuxCommandRunning {
 
 @Test("snapshot argv is static, explicit, noncreating, and exactly one runner call")
 func goldenInvocation() async throws {
-    let socket = URL(fileURLWithPath: "/tmp/does-not-exist-t3.sock")
-    let fake = FakeRunner(.init(exitCode: 1, termination: .exit, stdout: Data(), stderr: Data("no server running on /private/tmp/does-not-exist-t3.sock\n".utf8)))
+    let socket = URL(fileURLWithPath: "/tmp/does-not-exist.sock")
+    let fake = FakeRunner(.init(exitCode: 1, termination: .exit, stdout: Data(), stderr: Data("no server running on /private/tmp/does-not-exist.sock\n".utf8)))
     _ = try await TmuxSnapshotLoader(runner: fake, executableURL: URL(fileURLWithPath: "/opt/homebrew/bin/tmux")).load(socketURL: socket)
     let calls = await fake.captured()
-    let canonicalSocket = "/private/tmp/does-not-exist-t3.sock"
+    let canonicalSocket = "/private/tmp/does-not-exist.sock"
     #expect(calls.count == 1)
     #expect(calls[0].arguments == TmuxSnapshotCommand.arguments(socketPath: canonicalSocket))
     #expect(calls[0].arguments.prefix(4) == ["-S", canonicalSocket, "-N", "-u"])
@@ -29,7 +29,7 @@ func goldenInvocation() async throws {
 
 @Test("unknown nonzero and partial stdout are failures")
 func nonzeroClassification() async {
-    let socket = URL(fileURLWithPath: "/tmp/missing-t3-x.sock")
+    let socket = URL(fileURLWithPath: "/tmp/missing-x.sock")
     let unknown = FakeRunner(.init(exitCode: 2, termination: .exit, stdout: Data(), stderr: Data("weird".utf8)))
     await #expect(throws: TmuxFailure.self) { try await TmuxSnapshotLoader(runner: unknown).load(socketURL: socket) }
     let partial = FakeRunner(.init(exitCode: 1, termination: .exit, stdout: Data("x".utf8), stderr: Data("no server running".utf8)))
@@ -38,11 +38,11 @@ func nonzeroClassification() async {
 
 @Test("no-server diagnostic must exactly name the canonical requested socket")
 func exactNoServerDiagnostic() async {
-    let socket = URL(fileURLWithPath: "/tmp/missing-t3-exact.sock")
+    let socket = URL(fileURLWithPath: "/tmp/missing-exact.sock")
     let nearMisses = [
         "no server running on /private/tmp/other.sock\n",
-        "prefix no server running on /private/tmp/missing-t3-exact.sock suffix\n",
-        "error connecting to /private/tmp/missing-t3-exact.sock (Permission denied)\n"
+        "prefix no server running on /private/tmp/missing-exact.sock suffix\n",
+        "error connecting to /private/tmp/missing-exact.sock (Permission denied)\n"
     ]
     for message in nearMisses {
         let fake = FakeRunner(.init(exitCode: 1, termination: .exit, stdout: Data(), stderr: Data(message.utf8)))

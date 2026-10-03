@@ -342,7 +342,7 @@ final class RoomsStore: ObservableObject {
     }
 
     /// Relabels the rooms after a snapshot lands. The probe is advisory, so a
-    /// tracker that finds nothing simply leaves every room on its tmux name.
+    /// tracker that finds nothing leaves every room on its tmux name.
     private func refreshAgentPresence(for rooms: [SessionRoom], generation: Int) async {
         guard let agentTracker else { return }
         guard await agentTracker.refresh(rooms: rooms) else { return }

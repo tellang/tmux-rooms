@@ -30,8 +30,8 @@ public enum CodexSessionIndex {
     }
 }
 
-/// Triflux binds a native Codex process to its thread without inspecting its
-/// terminal or opening its transcript.
+/// triflux, a Codex launcher, can record which thread a native Codex process
+/// runs, so the thread is known without reading the terminal or the transcript.
 public enum CodexSessionRegistry {
     public static func defaultDirectory(environment: [String: String] = ProcessInfo.processInfo.environment, homeDirectory: URL = URL(fileURLWithPath: NSHomeDirectory())) -> URL {
         let root = environment["XDG_STATE_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
@@ -68,9 +68,10 @@ public enum CodexSessionRegistry {
     }
 }
 
-/// An OMX file can be shared by several panes in one checkout, so only its
-/// exact pane is eligible. The process table supplies the native Codex pid
-/// because OMX's own pid may identify its leader wrapper.
+/// oh-my-codex (OMX), a Codex wrapper, writes the current thread to
+/// `.omx/state/session.json` in the checkout. Several panes can share that file,
+/// so only its exact pane is eligible. The process table supplies the native
+/// Codex pid because OMX's own pid may be its wrapper process.
 public enum CodexOMXSession {
     private struct Payload: Decodable {
         let native_session_id: String

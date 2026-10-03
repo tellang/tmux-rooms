@@ -141,13 +141,13 @@ enum UIFixture: String, CaseIterable {
         case .singleFlight:
             return Definition(snapshot: Fixtures.snapshot([Fixtures.room(name: "single-flight", id: "$9")]), blocksActions: true)
         case .agentNamed:
-            let room = Fixtures.room(name: "omc-tmux-rooms-core-v1-20260901023710", id: "$10", command: "2.1.247")
+            let room = Fixtures.room(name: "agent-20260901023710", id: "$10", command: "2.1.247")
             return Definition(
                 snapshot: Fixtures.snapshot([room]),
                 agentPresence: ["$10": .named(.claude, "9.1 배포 경계")]
             )
         case .agentDetected:
-            let room = Fixtures.room(name: "omc-projects-detached-20260826230948", id: "$11", command: "codex")
+            let room = Fixtures.room(name: "agent-detached-20260826230948", id: "$11", command: "codex")
             return Definition(
                 snapshot: Fixtures.snapshot([room]),
                 agentPresence: ["$11": .detected(.codex)]

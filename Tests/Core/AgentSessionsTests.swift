@@ -19,7 +19,7 @@ private func pane(_ paneID: String, pid: Int32, active: Bool = true, dead: Bool 
     )
 }
 
-private func room(_ sessionID: String = "$0", name: String = "omc-tmux-rooms-core-v1-20260901023710", panes: [SessionRoom.Pane]) -> SessionRoom {
+private func room(_ sessionID: String = "$0", name: String = "agent-20260901023710", panes: [SessionRoom.Pane]) -> SessionRoom {
     SessionRoom(
         token: SessionToken(server: server, sessionID: sessionID, createdAtUnixSeconds: 1_700_000_001),
         name: name,
@@ -33,7 +33,7 @@ private func registryJSON(
     pid: Int32 = 86980,
     name: String? = "9.1 배포 경계",
     nameSource: String? = nil,
-    tmux: String? = "omc-tmux-rooms-core-v1-20260901023710:@98.%184"
+    tmux: String? = "agent-20260901023710:@98.%184"
 ) -> Data {
     var payload: [String: Any] = ["pid": pid, "cwd": "/Users/fixture/Projects"]
     if let name { payload["name"] = name }
@@ -46,8 +46,8 @@ private func registryJSON(
 
 @Test("a pane coordinate splits from the right so session names may hold : and .")
 func coordinateSplitsFromTheRight() throws {
-    let plain = try #require(TmuxPaneCoordinate("omc-tmux-rooms-core-v1-20260901023710:@98.%184"))
-    #expect(plain.sessionName == "omc-tmux-rooms-core-v1-20260901023710")
+    let plain = try #require(TmuxPaneCoordinate("agent-20260901023710:@98.%184"))
+    #expect(plain.sessionName == "agent-20260901023710")
     #expect(plain.windowID == "@98")
     #expect(plain.paneID == "%184")
 
@@ -76,7 +76,7 @@ func registryDecodesRenamedSession() throws {
     #expect(record.name == "9.1 배포 경계")
     #expect(record.nameIsDerived == false)
     #expect(record.paneID == "%184")
-    #expect(record.tmuxSessionName == "omc-tmux-rooms-core-v1-20260901023710")
+    #expect(record.tmuxSessionName == "agent-20260901023710")
 }
 
 @Test("a derived name is decoded but flagged")
@@ -307,8 +307,8 @@ func conversationTitleTakesTheLastRecord() {
 
 @Test("a rename recorded in the transcript outranks the derived title on the same line")
 func conversationTitlePrefersCustomTitle() {
-    let tail = transcript([#"{"type":"custom-title","customTitle":"8.28 cx 뒷단 테스트","sessionId":"s"}"#])
-    #expect(ClaudeConversationTitles.title(inTail: tail) == "8.28 cx 뒷단 테스트")
+    let tail = transcript([#"{"type":"custom-title","customTitle":"주간 정리","sessionId":"s"}"#])
+    #expect(ClaudeConversationTitles.title(inTail: tail) == "주간 정리")
 }
 
 @Test("a tail beginning mid-line drops only the truncated record")

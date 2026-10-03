@@ -2,15 +2,15 @@ import Foundation
 import Testing
 @testable import TmuxRoomsCore
 
-@Test("T7 repeated Open and Preview preserve counts while explicit Duplicate adds one client")
-func t7ActionCountInvariants() async throws {
+@Test("repeated Open and Preview preserve counts while explicit Duplicate adds one client")
+func actionCountInvariants() async throws {
     try await IsolatedTmuxHarness.withHarness { harness in
-        try await runT7ActionCountInvariants(harness)
+        try await runActionCountInvariants(harness)
     }
 }
 
 @MainActor
-private func runT7ActionCountInvariants(_ harness: IsolatedTmuxHarness) async throws {
+private func runActionCountInvariants(_ harness: IsolatedTmuxHarness) async throws {
         _ = try await harness.command(["new-session", "-d", "-s", "actions", "sleep", "30"])
         let loader = TmuxSnapshotLoader(executableURL: harness.tmux)
         let initial = try await loader.load(socketURL: harness.socket)

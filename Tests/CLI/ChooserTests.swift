@@ -182,7 +182,7 @@ struct ChooserDisplayTests {
     }
 
     @Test func detailNamesTheTmuxSession() {
-        #expect(RoomFormat.chooserDetail(room("omx-app")) == "tmux: omx-app  ($7)")
+        #expect(RoomFormat.chooserDetail(room("codex-app")) == "tmux: codex-app  ($9)")
     }
 }
 

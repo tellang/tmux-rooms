@@ -3,7 +3,7 @@ import Foundation
 /// A tmux release as reported by `#{version}`.
 ///
 /// tmux spells releases `<major>.<minor>` with an optional lowercase revision
-/// letter — `3.6`, `3.6b`, `3.7c` — and prefixes development builds `next-`.
+/// letter, as in `3.6`, `3.6b`, and `3.7c`, and prefixes development builds `next-`.
 /// Ordering a release against a floor lets a routine tmux upgrade keep working
 /// instead of blinding the app until someone edits an exact-match constant.
 struct TmuxVersion: Comparable {
@@ -32,7 +32,7 @@ enum TmuxParser {
     static let stdoutLimit = 16_777_216
     static let recordLimit = 100_000
     /// The oldest release whose format surface this parser has been verified
-    /// against. See `docs/decisions/managed-client-control.md`.
+    /// against. See `docs/design/managed-clients.md`.
     static let minimumSupportedVersion = TmuxVersion(major: 3, minor: 6, revision: 2)
 
     static func parse(_ data: Data) throws -> RawTmuxSnapshot {
