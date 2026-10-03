@@ -148,7 +148,7 @@ public enum ClaudeSessionRegistry {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return names.sorted().compactMap { name in
             guard name.hasSuffix(".json") else { return nil }
-            guard let data = try? Data(contentsOf: directory.appending(path: name)) else { return nil }
+            guard let data = BoundedFileReader.read(directory.appending(path: name), limit: BoundedFileReader.jsonStateLimit) else { return nil }
             guard let record = record(fromJSON: data) else { return nil }
             guard record.nameIsDerived, let projectsDirectory else { return record }
             return record.titled(from: projectsDirectory)

@@ -116,3 +116,19 @@ func codexEnvironmentLocations() {
     #expect(CodexSessionRegistry.defaultDirectory(environment: [:], homeDirectory: home).path == "/fixture/home/.local/state/triflux/codex-sessions")
     #expect(CodexSessionRegistry.defaultDirectory(environment: ["XDG_STATE_HOME":"/fixture/state"], homeDirectory: home).path == "/fixture/state/triflux/codex-sessions")
 }
+
+@Test("a symlinked Codex home still matches the resolved paths lsof reports")
+func probeLsofResolvesSymlinkedCodexHome() async throws {
+    let fixture = try AgentFixture(); defer { fixture.remove() }
+    let real = fixture.root.appending(path: "real-codex")
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: fixture.codexHome, withDestinationURL: real)
+    let rollout = real.appending(path: "sessions/2026/10/02/rollout-a.jsonl")
+    try fixture.write(#"{"id":"a","thread_name":"Linked"}"#, to: real.appending(path: "session_index.jsonl"))
+    try fixture.write(#"{"type":"session_meta","payload":{"id":"a","thread_source":"user"}}"#, to: rollout)
+    let resolved = try #require(realpath(rollout.path, nil))
+    defer { free(resolved) }
+    let runner = AgentFixtureRunner(ps: "100 1 node\n102 100 codex", lsof: "n" + String(cString: resolved))
+    let result = await fixture.probe(runner, lsof: true).inspect(for: [fixture.room])
+    #expect(result.presence["$0"] == .named(.codex, "Linked"))
+}

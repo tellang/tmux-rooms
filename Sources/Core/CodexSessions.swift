@@ -15,8 +15,9 @@ public enum CodexSessionIndex {
 
     public static func names(fromJSONL data: Data) -> [String: String] {
         var names: [String: String] = [:]
+        let decoder = JSONDecoder()
         for line in data.split(separator: 0x0a) {
-            guard let entry = try? JSONDecoder().decode(Entry.self, from: Data(line)), !entry.id.isEmpty else { continue }
+            guard let entry = try? decoder.decode(Entry.self, from: Data(line)), !entry.id.isEmpty else { continue }
             let name = entry.thread_name.trimmingCharacters(in: .whitespacesAndNewlines)
             names[entry.id] = name.isEmpty ? nil : name
         }
@@ -24,7 +25,7 @@ public enum CodexSessionIndex {
     }
 
     public static func names(in codexHome: URL) -> [String: String] {
-        guard let data = try? Data(contentsOf: codexHome.appending(path: "session_index.jsonl")) else { return [:] }
+        guard let data = BoundedFileReader.read(codexHome.appending(path: "session_index.jsonl"), limit: BoundedFileReader.sessionIndexLimit) else { return [:] }
         return names(fromJSONL: data)
     }
 }
@@ -61,7 +62,7 @@ public enum CodexSessionRegistry {
     public static func records(in directory: URL, names: [String: String]) -> [AgentSessionRecord] {
         let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return files.sorted().compactMap { file in
-            guard file.hasSuffix(".json"), let data = try? Data(contentsOf: directory.appending(path: file)) else { return nil }
+            guard file.hasSuffix(".json"), let data = BoundedFileReader.read(directory.appending(path: file), limit: BoundedFileReader.jsonStateLimit) else { return nil }
             return record(fromJSON: data, names: names)
         }
     }
@@ -90,7 +91,10 @@ public enum CodexOMXSession {
         return AgentSessionRecord(kind: .codex, pid: nativePID, sessionID: payload.native_session_id, name: name, nameIsDerived: false, paneID: paneID, tmuxSessionName: payload.tmux_session_name, currentPath: currentPath)
     }
 
+    /// tmux reports an absolute path; anything else would resolve against this
+    /// process's own working directory.
     static func ancestorDirectories(currentPath: String, homeDirectory: URL) -> [URL] {
+        guard currentPath.hasPrefix("/") else { return [] }
         let home = homeDirectory.standardizedFileURL.path
         var directory = URL(fileURLWithPath: currentPath, isDirectory: true).standardizedFileURL
         guard directory.path == home || directory.path.hasPrefix(home + "/") else { return [] }
@@ -105,7 +109,7 @@ public enum CodexOMXSession {
     public static func record(for pane: SessionRoom.Pane, nativePID: Int32, names: [String: String], homeDirectory: URL, table: ProcessTable) -> AgentSessionRecord? {
         for directory in ancestorDirectories(currentPath: pane.currentPath, homeDirectory: homeDirectory) {
             let file = directory.appending(path: ".omx/state/session.json")
-            guard let data = try? Data(contentsOf: file) else { continue }
+            guard let data = BoundedFileReader.read(file, limit: BoundedFileReader.jsonStateLimit) else { continue }
             if let record = record(fromJSON: data, paneID: pane.paneID, nativePID: nativePID, currentPath: pane.currentPath, names: names, panePID: pane.panePID, table: table) { return record }
         }
         return nil
@@ -134,7 +138,7 @@ public enum CodexRolloutSession {
 
     /// Read only the header, never a growing conversation body.
     private static func firstLine(of url: URL) -> Data? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        guard let handle = BoundedFileReader.open(url)?.handle else { return nil }
         defer { try? handle.close() }
         var line = Data()
         while line.count < 65_536 {
@@ -145,16 +149,26 @@ public enum CodexRolloutSession {
         return nil
     }
 
+    /// Both sides are resolved before the prefix test, so a symlinked Codex home
+    /// still matches and a symlink inside it cannot point outside.
     static func sessionID(lsofOutput: String, codexHome: URL) -> String? {
-        let root = codexHome.appending(path: "sessions", directoryHint: .isDirectory).standardizedFileURL.path + "/"
+        guard let home = realPath(codexHome.path) else { return nil }
+        let root = home + "/sessions/"
         var candidates: [(id: String, modified: Date, path: String)] = []
         for line in lsofOutput.split(separator: "\n") where line.first == "n" {
-            let url = URL(fileURLWithPath: String(line.dropFirst())).standardizedFileURL
+            guard let path = realPath(String(line.dropFirst())) else { continue }
+            let url = URL(fileURLWithPath: path)
             guard url.path.hasPrefix(root), url.lastPathComponent.hasPrefix("rollout-"), url.pathExtension == "jsonl",
                   let first = firstLine(of: url), let id = sessionID(fromFirstLine: first) else { continue }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
             candidates.append((id, modified, url.path))
         }
         return candidates.sorted { a, b in a.modified != b.modified ? a.modified > b.modified : a.path < b.path }.first?.id
+    }
+
+    private static func realPath(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 }
