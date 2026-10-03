@@ -14,9 +14,13 @@ struct TmuxRoomsApp: App {
         let store: RoomsStore
         #if DEBUG
         if let value = ProcessInfo.processInfo.environment["TMUX_ROOMS_UI_FIXTURE"] {
-            store = UIFixture(rawValue: value)?.makeStore() ?? UIFixture.invalidStore(value)
-            _menuBarExtraInserted = State(initialValue: false)
-            fixtureWindowEnabled = true
+            let fixture = UIFixture(rawValue: value)
+            store = fixture?.makeStore() ?? UIFixture.invalidStore(value)
+            // The README demo is recorded from the real menu-bar panel. Every other
+            // fixture drives the UI tests through a plain window.
+            let showsMenuBar = fixture == .readmeDemo
+            _menuBarExtraInserted = State(initialValue: showsMenuBar)
+            fixtureWindowEnabled = !showsMenuBar
         } else {
             store = RoomsStore.production()
             _menuBarExtraInserted = State(initialValue: true)
