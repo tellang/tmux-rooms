@@ -18,7 +18,7 @@ public enum CodexSessionIndex {
         let decoder = JSONDecoder()
         for line in data.split(separator: 0x0a) {
             guard let entry = try? decoder.decode(Entry.self, from: Data(line)), !entry.id.isEmpty else { continue }
-            let name = entry.thread_name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = TerminalText.sanitized(entry.thread_name).trimmingCharacters(in: .whitespacesAndNewlines)
             names[entry.id] = name.isEmpty ? nil : name
         }
         return names

@@ -236,6 +236,23 @@ struct RoomQueryTests {
         #expect(paneJSON[1]["state"] as? String == "unknown")
     }
 
+    @Test func textOutputCarriesNoControlCharactersButJSONKeepsThemEscaped() throws {
+        let hostile = "\u{1B}]52;c;ZXZpbA==\u{07}"
+        let source = room("$1", name: "tmux\u{9B}2J", paths: ["/p/\(hostile)dir"])
+        let all = rooms([source], presence: ["$1": .named(.codex, "title\(hostile)\n")])
+        let outputs = [
+            RoomFormat.table(all, home: "/Users/fixture", timeZone: utc),
+            RoomFormat.chooserLine(index: 1, room: all[0], home: "/Users/fixture", timeZone: utc),
+            RoomFormat.chooserDetail(all[0]),
+        ] + RoomFormat.chooserRows(all, home: "/Users/fixture", timeZone: utc)
+        for output in outputs {
+            #expect(!output.unicodeScalars.contains { $0.value < 0x20 && $0 != "\n" || (0x7F...0x9F).contains($0.value) })
+        }
+        #expect(outputs[0].contains("/p/]52;c;ZXZpbA==dir") && outputs[0].contains("tmux2J"))
+        let json = try RoomFormat.json(all)
+        #expect(json.contains("\\u001b]52") && !json.unicodeScalars.contains("\u{1B}"))
+    }
+
     @Test func deadPanesAreNotIncludedInJSON() throws {
         let live = SessionRoom.Pane(windowID: "@1", paneID: "%1", panePID: 101, currentPath: "/live", title: "", currentCommand: "zsh", isActive: true, isDead: false)
         let dead = SessionRoom.Pane(windowID: "@1", paneID: "%2", panePID: 102, currentPath: "/dead", title: "", currentCommand: "zsh", isActive: false, isDead: true)

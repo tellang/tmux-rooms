@@ -1,4 +1,5 @@
 import Foundation
+import TmuxRoomsCore
 
 /// Terminal column widths, counting Hangul and other East Asian wide scalars as
 /// two cells so padded columns stay aligned for Korean room names.
@@ -39,11 +40,17 @@ enum TextWidth {
 enum RoomFormat {
     static let titleWidth = 28
 
+    /// Text output never carries a control character from a room's names or
+    /// paths. JSON output is left raw because the encoder escapes it.
+    static func display(_ text: String) -> String {
+        TerminalText.sanitized(text)
+    }
+
     /// Swaps a leading home directory for `~`.
     static func abbreviate(_ path: String, home: String) -> String {
         if path == home { return "~" }
-        if !home.isEmpty, path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
-        return path
+        if !home.isEmpty, path.hasPrefix(home + "/") { return display("~" + path.dropFirst(home.count)) }
+        return display(path)
     }
 
     static func lastActivity(_ unixSeconds: Int64, timeZone: TimeZone = .current) -> String {
@@ -75,12 +82,12 @@ enum RoomFormat {
         let header = ["TITLE", "AGENT", "CLIENTS", "LAST", "PATH", "TMUX"]
         let body = rooms.map { room in
             [
-                TextWidth.truncate(room.title, to: titleWidth),
+                TextWidth.truncate(display(room.title), to: titleWidth),
                 AgentStyle.tag(for: room.agent),
                 clients(room),
                 lastActivity(room.lastActivityAtUnixSeconds, timeZone: timeZone),
                 location(room, home: home),
-                room.titleIsTmuxName ? "-" : room.tmuxName,
+                room.titleIsTmuxName ? "-" : display(room.tmuxName),
             ]
         }
         let last = header.count - 1
@@ -99,11 +106,11 @@ enum RoomFormat {
     /// One line of the attach chooser.
     static func chooserLine(index: Int, room: CLIRoom, home: String, timeZone: TimeZone = .current) -> String {
         var parts = [
-            "  \(index)) \(TextWidth.truncate(room.title, to: titleWidth))",
+            "  \(index)) \(TextWidth.truncate(display(room.title), to: titleWidth))",
             lastActivity(room.lastActivityAtUnixSeconds, timeZone: timeZone),
             location(room, home: home),
         ]
-        if !room.titleIsTmuxName { parts.append(room.tmuxName) }
+        if !room.titleIsTmuxName { parts.append(display(room.tmuxName)) }
         if room.interactiveClients > 0 { parts.append("[attached]") }
         return parts.joined(separator: "  ")
     }
@@ -112,7 +119,7 @@ enum RoomFormat {
     /// cursor marker so the caller can style the highlighted one.
     static func chooserRows(_ rooms: [CLIRoom], home: String, timeZone: TimeZone = .current) -> [String] {
         let indexWidth = String(rooms.count).count
-        let titles = rooms.map { TextWidth.truncate($0.title, to: titleWidth) }
+        let titles = rooms.map { TextWidth.truncate(display($0.title), to: titleWidth) }
         let tags = rooms.map { AgentStyle.tag(for: $0.agent) }
         let places = rooms.map { location($0, home: home) }
         let titleColumn = titles.map(TextWidth.of).max() ?? 0
@@ -133,7 +140,7 @@ enum RoomFormat {
     /// What the chooser's footer says about the highlighted room: the parts the
     /// row had to leave out.
     static func chooserDetail(_ room: CLIRoom) -> String {
-        "tmux: \(room.tmuxName)  (\(room.sessionID))"
+        "tmux: \(display(room.tmuxName))  (\(display(room.sessionID)))"
     }
 
     private struct JSONRoom: Encodable {

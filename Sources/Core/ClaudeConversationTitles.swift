@@ -37,7 +37,7 @@ public enum ClaudeConversationTitles {
         for line in data.split(separator: 0x0a).reversed() {
             guard let record = try? JSONDecoder().decode(TitleRecord.self, from: Data(line)) else { continue }
             guard record.type == "ai-title" || record.type == "custom-title" else { continue }
-            guard let title = record.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { continue }
+            guard let title = record.title.map(TerminalText.sanitized)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { continue }
             return title
         }
         return nil

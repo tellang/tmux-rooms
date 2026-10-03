@@ -122,7 +122,7 @@ public enum ClaudeSessionRegistry {
     public static func record(fromJSON data: Data) -> AgentSessionRecord? {
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data) else { return nil }
         guard payload.pid > 0 else { return nil }
-        guard let name = payload.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        guard let name = payload.name.map(TerminalText.sanitized)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
         guard let coordinate = payload.tmux.flatMap(TmuxPaneCoordinate.init) else { return nil }
         return AgentSessionRecord(
             kind: .claude,
