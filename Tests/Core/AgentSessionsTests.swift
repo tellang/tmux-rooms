@@ -115,6 +115,15 @@ func registryToleratesMissingDirectory() {
     #expect(ClaudeSessionRegistry.records(in: missing, projectsDirectory: nil).isEmpty)
 }
 
+@Test("CLAUDE_CONFIG_DIR moves the registry only when it is an absolute path")
+func registryFollowsClaudeConfigDir() {
+    let home = URL(fileURLWithPath: "/fixture/home", isDirectory: true)
+    #expect(ClaudeSessionRegistry.configDirectory(environment: [:], homeDirectory: home).path == "/fixture/home/.claude")
+    #expect(ClaudeSessionRegistry.configDirectory(environment: ["CLAUDE_CONFIG_DIR": "/fixture/claude"], homeDirectory: home).path == "/fixture/claude")
+    #expect(ClaudeSessionRegistry.configDirectory(environment: ["CLAUDE_CONFIG_DIR": "relative/claude"], homeDirectory: home).path == "/fixture/home/.claude")
+    #expect(ClaudeSessionRegistry.configDirectory(environment: ["CLAUDE_CONFIG_DIR": ""], homeDirectory: home).path == "/fixture/home/.claude")
+}
+
 // MARK: - Process table
 
 @Test("the process table finds an agent below a pane's own shell")

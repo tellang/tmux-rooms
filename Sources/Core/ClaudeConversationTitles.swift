@@ -16,9 +16,7 @@ public enum ClaudeConversationTitles {
     static let tailByteCount = 262_144
 
     public static var defaultProjectsDirectory: URL {
-        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appending(path: ".claude", directoryHint: .isDirectory)
-            .appending(path: "projects", directoryHint: .isDirectory)
+        ClaudeSessionRegistry.configDirectory().appending(path: "projects", directoryHint: .isDirectory)
     }
 
     private struct TitleRecord: Decodable {

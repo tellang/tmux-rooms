@@ -102,9 +102,19 @@ public enum AgentPresence: Sendable, Hashable {
 /// it is trusted.
 public enum ClaudeSessionRegistry {
     public static var defaultDirectory: URL {
-        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appending(path: ".claude", directoryHint: .isDirectory)
-            .appending(path: "sessions", directoryHint: .isDirectory)
+        configDirectory().appending(path: "sessions", directoryHint: .isDirectory)
+    }
+
+    /// Claude Code's configuration directory: `CLAUDE_CONFIG_DIR` when it holds
+    /// an absolute path, as Claude Code itself honors it, otherwise `~/.claude`.
+    public static func configDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    ) -> URL {
+        if let configured = environment["CLAUDE_CONFIG_DIR"], configured.hasPrefix("/") {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+        }
+        return homeDirectory.appending(path: ".claude", directoryHint: .isDirectory)
     }
 
     private struct Payload: Decodable {
