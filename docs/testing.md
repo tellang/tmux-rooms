@@ -66,8 +66,7 @@ the tests again.
 
 To look at the app with made-up rooms yourself, run a Debug build with
 `TMUX_ROOMS_UI_FIXTURE=readme-demo`. It puts the menu-bar icon up with five
-sample rooms, which is how `docs/images/tray.gif` was recorded, and never reads
-your tmux server.
+sample rooms and never reads your tmux server.
 
 ## Installer tests
 

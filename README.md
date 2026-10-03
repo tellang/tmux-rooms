@@ -7,7 +7,7 @@ See every tmux session at a glance and get into any of them with one click.
 Tmux Rooms is a macOS menu-bar app, plus a command line tool called `tmr`, for
 people who run tmux inside iTerm2.
 
-![The Tmux Rooms panel in the menu bar](docs/images/tray.gif)
+![Opening a room from the menu bar attaches iTerm2 to it](docs/images/tray.gif)
 
 ## Why
 
