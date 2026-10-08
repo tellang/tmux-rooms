@@ -18,3 +18,10 @@ TmuxRooms.xcodeproj/xcuserdata/
 *.cer
 *.mobileprovision
 *.keychain-db
+
+# Local agent and MCP state; .mcp.json can hold API keys
+.mcp.json
+.claude/
+.omc/
+.triflux/
+.omx/

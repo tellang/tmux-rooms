@@ -40,7 +40,7 @@ targets:
           CODE_SIGN_IDENTITY: "-"
         Release:
           CODE_SIGN_STYLE: Manual
-          CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+          CODE_SIGN_IDENTITY: "-"
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 
   # The target name differs from the product name on purpose: `tmuxrooms` and the
@@ -63,7 +63,7 @@ targets:
           CODE_SIGN_IDENTITY: "-"
         Release:
           CODE_SIGN_STYLE: Manual
-          CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+          CODE_SIGN_IDENTITY: "-"
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 
   TmuxRooms:
@@ -102,7 +102,7 @@ targets:
           CODE_SIGN_IDENTITY: "-"
         Release:
           CODE_SIGN_STYLE: Manual
-          CODE_SIGN_IDENTITY: Tmux Rooms Local Development
+          CODE_SIGN_IDENTITY: "-"
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
     postBuildScripts:
       - name: Embed tmuxrooms-launch
