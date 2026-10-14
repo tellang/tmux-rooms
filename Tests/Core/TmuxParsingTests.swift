@@ -51,7 +51,7 @@ func emptyServer() throws { #expect(try parseVerified(record("B", boundary) + re
     Data("B2:x\n".utf8), Data("B1:x".utf8), record("S", session), record("B", boundary) + record("E", boundary) + Data([0]),
     record("B", boundary) + record("B", boundary) + record("E", boundary),
     record("B", boundary) + record("X", []) + record("E", boundary)
-])
+] as [Data])
 func malformedFramingIsRejected(data: Data) { #expect(throws: TmuxFailure.self) { try parseVerified(data) } }
 
 @Test("NUL and configured limits are rejected")
