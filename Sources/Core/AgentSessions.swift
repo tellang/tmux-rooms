@@ -68,7 +68,8 @@ public struct AgentSessionRecord: Sendable, Hashable {
 
 /// What a room can say about the agent inside it.
 public enum AgentPresence: Sendable, Hashable {
-    /// The agent's own session name, taken from its registry.
+    /// The agent's own session name, taken from its registry or, for Claude,
+    /// from the title it wrote into its pane.
     case named(AgentKind, String)
     /// The agent is proven to be running but did not publish a usable name.
     case detected(AgentKind)
@@ -302,13 +303,16 @@ public struct ProcessTable: Sendable, Hashable {
 /// a status glyph: `✳` when idle, a Braille spinner while working.
 public enum PaneTitle {
     /// The usable name in `title`, or `nil` when it is only a default: empty,
-    /// Claude Code's own placeholder, or the host name tmux gives a new pane.
+    /// Claude Code's own placeholder, a `claude` command line a shell put
+    /// there, or the host name tmux gives a new pane.
     public static func agentName(from title: String, hostName: String = localHostName) -> String? {
         let scalars = TerminalText.sanitized(title).unicodeScalars.drop(while: isLeadingMarker)
-        let name = String(String.UnicodeScalarView(scalars)).trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
         let folded = name.lowercased()
-        guard folded != "claude", folded != "claude code" else { return nil }
+        // A shell shows the command as typed, in lowercase; a conversation
+        // title such as "Claude API 정리" is left alone.
+        guard folded != "claude", folded != "claude code", !name.hasPrefix("claude ") else { return nil }
         let host = hostName.lowercased()
         if !host.isEmpty, folded == host || folded == host.split(separator: ".").first.map(String.init) { return nil }
         return name
@@ -321,11 +325,13 @@ public enum PaneTitle {
         return String(cString: buffer)
     }()
 
-    /// Whitespace, Dingbats such as `✳`, and Braille spinner frames.
+    /// Whitespace, Dingbats such as `✳` with any variation selector after
+    /// them, and Braille spinner frames.
     private static func isLeadingMarker(_ scalar: Unicode.Scalar) -> Bool {
         scalar.properties.isWhitespace
             || (0x2700...0x27BF).contains(scalar.value)
             || (0x2800...0x28FF).contains(scalar.value)
+            || (0xFE00...0xFE0F).contains(scalar.value)
     }
 }
 

@@ -259,7 +259,7 @@ func resolverNamesUnregisteredClaudeFromPaneTitle() {
 
 @Test("the status glyph Claude puts before its title is dropped")
 func resolverStripsStatusGlyphFromPaneTitle() {
-    for title in ["✳ 10.14 tmr 리드", "⠂ 10.14 tmr 리드", "⠐ 10.14 tmr 리드", "  ✳  10.14 tmr 리드  "] {
+    for title in ["✳ 10.14 tmr 리드", "⠂ 10.14 tmr 리드", "⠐ 10.14 tmr 리드", "  ✳  10.14 tmr 리드  ", "✳\u{FE0F} 10.14 tmr 리드"] {
         let subject = room(panes: [pane("%1", pid: 500, title: title)])
         let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "500 1 claude"))
         #expect(presence == .named(.claude, "10.14 tmr 리드"), "\(title)")
@@ -270,7 +270,7 @@ func resolverStripsStatusGlyphFromPaneTitle() {
 func resolverIgnoresDefaultPaneTitles() {
     let host = PaneTitle.localHostName
     let short = host.split(separator: ".").first.map(String.init) ?? host
-    for title in ["", "   ", "✳", "✳ ", "Claude", "claude", "✳ Claude Code", "⠂ Claude Code", host, short] {
+    for title in ["", "   ", "✳", "✳ ", "Claude", "claude", "✳ Claude Code", "⠂ Claude Code", "✳\u{FE0F} Claude Code", "claude agents", "✳ claude --resume", host, short] {
         let subject = room(panes: [pane("%1", pid: 500, title: title)])
         let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "500 1 claude"))
         #expect(presence == .detected(.claude), "\(title)")
@@ -284,6 +284,7 @@ func paneTitleRejectsHostName() {
     #expect(PaneTitle.agentName(from: "mac-studio", hostName: "Mac-Studio.local") == nil)
     #expect(PaneTitle.agentName(from: "Mac-Studio 작업", hostName: "Mac-Studio.local") == "Mac-Studio 작업")
     #expect(PaneTitle.agentName(from: "✳ Claude Code", hostName: "") == nil)
+    #expect(PaneTitle.agentName(from: "Claude API 정리", hostName: "") == "Claude API 정리")
     #expect(PaneTitle.agentName(from: "작업\u{1B}]0;x\u{07}", hostName: "") == "작업]0;x")
 }
 
@@ -294,6 +295,8 @@ func resolverPrefersRecordOverPaneTitle() {
     #expect(presence == .named(.claude, "9.1 배포 경계"))
 }
 
+// A matched record already falls back to its transcript title, so the pane
+// title only fills in for a session with no record at all.
 @Test("a matched record with a derived name keeps the agent label rather than the pane title")
 func resolverKeepsDerivedRecordBehaviour() {
     let subject = room(panes: [pane("%184", pid: 86980, title: "✳ 다른 제목")])
