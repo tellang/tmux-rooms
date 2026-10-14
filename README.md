@@ -168,14 +168,18 @@ read for `ls --json`, and state is never guessed from a process name.
 
 ## Where agent names come from
 
-Tmux Rooms only reads these files. When none of them has a name, the room is
-labelled `Claude`, `Codex`, or `Antigravity`, and a room with no agent keeps its
-tmux name.
+Tmux Rooms only reads these files, plus the tmux pane title for Claude Code.
+When none of them has a name, the room is labelled `Claude`, `Codex`, or
+`Antigravity`, and a room with no agent keeps its tmux name.
 
 - Claude Code keeps `~/.claude/sessions/<pid>.json` (under `$CLAUDE_CONFIG_DIR`
   when that is set), which records the name set with `/rename` and the pane
   the session runs in. A session nobody renamed falls back to the conversation
-  title in its transcript.
+  title in its transcript. A background session viewed through `claude agents`
+  records no pane, so that pane is named from the title Claude Code wrote into
+  it, without the leading status glyph. An empty title, `Claude`,
+  `Claude Code`, a `claude` command line, or the host name tmux gives a new
+  pane is ignored.
 - Codex thread names come from `$CODEX_HOME/session_index.jsonl` (`~/.codex`
   by default), and the last rename wins. To work out which thread a pane is
   running, Tmux Rooms checks the registry the triflux launcher writes at

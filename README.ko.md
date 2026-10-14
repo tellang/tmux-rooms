@@ -162,12 +162,16 @@ Claude의 상태는 Claude의 세션 레지스트리에서 읽는다. Codex는 p
 
 ## 에이전트 이름을 가져오는 곳
 
-Tmux Rooms는 아래 파일을 읽기만 한다. 어디에도 이름이 없으면 방은 `Claude`,
-`Codex`, `Antigravity`로 표시된다. 에이전트가 없는 방은 tmux 이름을 그대로 쓴다.
+Tmux Rooms는 아래 파일과, Claude Code의 경우 tmux pane 제목을 읽기만 한다.
+어디에도 이름이 없으면 방은 `Claude`, `Codex`, `Antigravity`로 표시된다. 에이전트가 없는 방은 tmux 이름을 그대로 쓴다.
 
 - Claude Code는 `~/.claude/sessions/<pid>.json`을 남긴다(`CLAUDE_CONFIG_DIR`가
   설정돼 있으면 그 아래). `/rename`으로 정한 이름과 세션이 도는 pane이 여기
   기록된다. 이름을 바꾼 적이 없는 세션은 대화 기록의 제목을 쓴다.
+  `claude agents`로 보는 백그라운드 세션은 pane을 기록하지 않으므로, 그 pane은
+  Claude Code가 pane에 써 둔 제목에서 앞의 상태 기호를 떼고 이름으로 쓴다. 빈
+  제목, `Claude`, `Claude Code`, `claude` 명령줄, tmux가 새 pane에 붙이는 호스트
+  이름은 쓰지 않는다.
 - Codex 스레드 이름은 `$CODEX_HOME/session_index.jsonl`에서 가져온다(기본값
   `~/.codex`). 이름을 여러 번 바꿨으면 마지막 이름을 쓴다. 어떤 pane이 어떤
   스레드를 돌리는지는 다음 순서로 찾는다.

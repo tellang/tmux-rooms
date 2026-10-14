@@ -4,13 +4,13 @@ import Testing
 
 private let server = ServerIdentity(canonicalSocketPath: "/tmp/t.sock", socketDevice: 1, socketInode: 2, serverPID: 10, startedAtUnixSeconds: 1_700_000_000)
 
-private func pane(_ paneID: String, pid: Int32, active: Bool = true, dead: Bool = false, command: String = "2.1.247") -> SessionRoom.Pane {
+private func pane(_ paneID: String, pid: Int32, active: Bool = true, dead: Bool = false, command: String = "2.1.247", title: String = "✳ Claude Code") -> SessionRoom.Pane {
     SessionRoom.Pane(
         windowID: "@1",
         paneID: paneID,
         panePID: pid,
         currentPath: "/Users/fixture/Projects",
-        title: "pane",
+        title: title,
         currentCommand: command,
         isActive: active,
         isDead: dead,
@@ -244,6 +244,77 @@ func resolverDetectsUnregisteredAgent() {
     let subject = room(panes: [pane("%101", pid: 25124, command: "2.1.229")])
     let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "25124 4382 claude"))
     #expect(presence == .detected(.claude))
+}
+
+@Test("a Claude pane with no registry entry takes the title Claude wrote into it")
+func resolverNamesUnregisteredClaudeFromPaneTitle() {
+    // `claude agents` attaching a background session: the bg record names no pane.
+    let subject = room(name: "us-lead", panes: [pane("%100", pid: 57054, title: "10.13 미장 거래 리드")])
+    let bg = ClaudeSessionRegistry.record(fromJSON: registryJSON(pid: 13392, name: "10.13 미장 거래 리드", tmux: nil))
+    #expect(bg == nil)
+    let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "57054 78260 claude"))
+    #expect(presence == .named(.claude, "10.13 미장 거래 리드"))
+    #expect(presence.title == "10.13 미장 거래 리드")
+}
+
+@Test("the status glyph Claude puts before its title is dropped")
+func resolverStripsStatusGlyphFromPaneTitle() {
+    for title in ["✳ 10.14 tmr 리드", "⠂ 10.14 tmr 리드", "⠐ 10.14 tmr 리드", "  ✳  10.14 tmr 리드  ", "✳\u{FE0F} 10.14 tmr 리드"] {
+        let subject = room(panes: [pane("%1", pid: 500, title: title)])
+        let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "500 1 claude"))
+        #expect(presence == .named(.claude, "10.14 tmr 리드"), "\(title)")
+    }
+}
+
+@Test("a pane title that is only a default stays the agent label")
+func resolverIgnoresDefaultPaneTitles() {
+    let host = PaneTitle.localHostName
+    let short = host.split(separator: ".").first.map(String.init) ?? host
+    for title in ["", "   ", "✳", "✳ ", "Claude", "claude", "✳ Claude Code", "⠂ Claude Code", "✳\u{FE0F} Claude Code", "claude agents", "✳ claude --resume", host, short] {
+        let subject = room(panes: [pane("%1", pid: 500, title: title)])
+        let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "500 1 claude"))
+        #expect(presence == .detected(.claude), "\(title)")
+        #expect(presence.title == "Claude")
+    }
+}
+
+@Test("default pane titles are recognised against the host name tmux uses")
+func paneTitleRejectsHostName() {
+    #expect(PaneTitle.agentName(from: "Mac-Studio.local", hostName: "Mac-Studio.local") == nil)
+    #expect(PaneTitle.agentName(from: "mac-studio", hostName: "Mac-Studio.local") == nil)
+    #expect(PaneTitle.agentName(from: "Mac-Studio 작업", hostName: "Mac-Studio.local") == "Mac-Studio 작업")
+    #expect(PaneTitle.agentName(from: "✳ Claude Code", hostName: "") == nil)
+    #expect(PaneTitle.agentName(from: "Claude API 정리", hostName: "") == "Claude API 정리")
+    #expect(PaneTitle.agentName(from: "작업\u{1B}]0;x\u{07}", hostName: "") == "작업]0;x")
+}
+
+@Test("a registry record still outranks the pane title")
+func resolverPrefersRecordOverPaneTitle() {
+    let subject = room(panes: [pane("%184", pid: 86980, title: "✳ 다른 제목")])
+    let presence = AgentPresenceResolver.presence(for: subject, records: [ClaudeSessionRegistry.record(fromJSON: registryJSON())!], table: ProcessTable(psOutput: "86980 4382 claude"))
+    #expect(presence == .named(.claude, "9.1 배포 경계"))
+}
+
+// A matched record already falls back to its transcript title, so the pane
+// title only fills in for a session with no record at all.
+@Test("a matched record with a derived name keeps the agent label rather than the pane title")
+func resolverKeepsDerivedRecordBehaviour() {
+    let subject = room(panes: [pane("%184", pid: 86980, title: "✳ 다른 제목")])
+    let record = ClaudeSessionRegistry.record(fromJSON: registryJSON(name: "tmux-rooms-4a", nameSource: "derived"))!
+    let presence = AgentPresenceResolver.presence(for: subject, records: [record], table: ProcessTable(psOutput: "86980 4382 claude"))
+    #expect(presence == .detected(.claude))
+}
+
+@Test("only Claude's pane title is read; other agents keep their label")
+func resolverReadsPaneTitleOnlyForClaude() {
+    let subject = room(panes: [pane("%7", pid: 500, command: "codex", title: "some title")])
+    #expect(AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "500 4382 codex")) == .detected(.codex))
+}
+
+@Test("a shell pane's title never names a room")
+func resolverIgnoresTitleWithoutAgent() {
+    let subject = room(panes: [pane("%3", pid: 700, command: "zsh", title: "작업 중")])
+    #expect(AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "700 4382 zsh")) == .absent)
 }
 
 @Test("codex is detected by process alone since it publishes no pane")
