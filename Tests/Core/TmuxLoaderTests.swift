@@ -24,7 +24,7 @@ func goldenInvocation() async throws {
     #expect(TmuxSnapshotCommand.boundaryFormat == "B1:1#{n:socket_path}:#{socket_path}#{n:pid}:#{pid}#{n:start_time}:#{start_time}#{n:version}:#{version}")
     #expect(TmuxSnapshotCommand.sessionFormat == "S#{n:session_id}:#{session_id}#{n:session_created}:#{session_created}#{n:session_name}:#{session_name}#{n:session_activity}:#{session_activity}#{n:session_attached}:#{session_attached}")
     #expect(TmuxSnapshotCommand.clientFormat == "C#{n:client_name}:#{client_name}#{n:client_tty}:#{client_tty}#{n:client_pid}:#{client_pid}#{n:client_created}:#{client_created}#{n:session_id}:#{session_id}#{n:client_activity}:#{client_activity}#{n:client_flags}:#{client_flags}#{n:client_readonly}:#{client_readonly}#{n:client_termname}:#{client_termname}#{n:client_control_mode}:#{client_control_mode}")
-    #expect(TmuxSnapshotCommand.paneFormat == "P#{n:session_id}:#{session_id}#{n:window_id}:#{window_id}#{n:pane_id}:#{pane_id}#{n:pane_pid}:#{pane_pid}#{n:pane_current_path}:#{pane_current_path}#{n:pane_title}:#{pane_title}#{n:pane_current_command}:#{pane_current_command}#{n:pane_active}:#{pane_active}#{n:pane_dead}:#{pane_dead}#{n:window_index}:#{window_index}#{n:pane_index}:#{pane_index}")
+    #expect(TmuxSnapshotCommand.paneFormat == "P#{n:session_id}:#{session_id}#{n:window_id}:#{window_id}#{n:pane_id}:#{pane_id}#{n:pane_pid}:#{pane_pid}#{n:pane_current_path}:#{pane_current_path}#{n:pane_title}:#{pane_title}#{n:pane_current_command}:#{pane_current_command}#{n:pane_active}:#{pane_active}#{n:pane_dead}:#{pane_dead}#{n:window_index}:#{window_index}#{n:pane_index}:#{pane_index}#{n:@tfx_codex_thread}:#{@tfx_codex_thread}")
 }
 
 @Test("unknown nonzero and partial stdout are failures")

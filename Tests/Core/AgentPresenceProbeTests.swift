@@ -150,6 +150,21 @@ func probeLsofResolvesSymlinkedCodexHome() async throws {
     #expect(result.presence["$0"] == .named(.codex, "Linked"))
 }
 
+@Test("the triflux pane option names a daemon-attached Codex without extra commands and outranks OMX")
+func probePaneOptionNamesDaemonCodex() async throws {
+    let fixture = try AgentFixture(); defer { fixture.remove() }
+    try fixture.write("{\"id\":\"old\",\"thread_name\":\"Old\"}\n{\"id\":\"adopted\",\"thread_name\":\"Adopted\"}", to: fixture.codexHome.appending(path: "session_index.jsonl"))
+    try fixture.write(#"{"native_session_id":"old","pid":100,"tmux_pane_id":"%228"}"#, to: fixture.root.appending(path: "repo/.omx/state/session.json"))
+    let base = fixture.room
+    let pane = base.panes[0]
+    let room = SessionRoom(token: base.token, name: base.name, lastActivityAtUnixSeconds: base.lastActivityAtUnixSeconds, panes: [
+        SessionRoom.Pane(windowID: pane.windowID, paneID: pane.paneID, panePID: pane.panePID, currentPath: pane.currentPath, title: pane.title, currentCommand: pane.currentCommand, isActive: true, isDead: false, windowIndex: 0, paneIndex: 0, codexThreadID: "adopted"),
+    ], clients: [])
+    let runner = AgentFixtureRunner(ps: "100 1 node\n102 100 codex")
+    #expect(await fixture.probe(runner).inspect(for: [room]).presence["$0"] == .named(.codex, "Adopted"))
+    #expect(await runner.invocations.map { $0.executableURL.lastPathComponent } == ["ps"])
+}
+
 @Test("with lsof the open rollout outranks an OMX file left by /new or /resume")
 func probeRolloutOutranksOMX() async throws {
     let fixture = try AgentFixture(); defer { fixture.remove() }

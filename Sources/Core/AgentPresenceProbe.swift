@@ -108,9 +108,14 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
 
     /// The rollout the Codex process holds open is its current thread, so it
     /// outranks an OMX file that a `/new` or `/resume` has left behind. The
-    /// menu-bar refresh never runs lsof and reads OMX alone.
+    /// menu-bar refresh never runs lsof and reads the pane option and OMX alone.
+    /// A Codex TUI on the shared app-server daemon holds no rollout and its hooks
+    /// run in the daemon, so the pane option triflux records is its only record.
     private func codexFallbackRecord(for pane: SessionRoom.Pane, nativePID: Int32, names: [String: String], table: ProcessTable) async -> AgentSessionRecord? {
         if allowLsofFallback, let record = await rolloutRecord(for: pane, nativePID: nativePID, names: names) { return record }
+        if let name = names[pane.codexThreadID] {
+            return AgentSessionRecord(kind: .codex, pid: nativePID, sessionID: pane.codexThreadID, name: name, nameIsDerived: false, paneID: pane.paneID, tmuxSessionName: nil, currentPath: pane.currentPath)
+        }
         return CodexOMXSession.record(for: pane, nativePID: nativePID, names: names, homeDirectory: homeDirectory, table: table)
     }
 
