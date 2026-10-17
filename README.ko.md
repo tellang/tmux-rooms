@@ -178,7 +178,10 @@ Tmux Rooms는 아래 파일과, Claude Code의 경우 tmux pane 제목을 읽기
   1. triflux 런처가 쓰는 레지스트리
      `$XDG_STATE_HOME/triflux/codex-sessions/<pid>.json`(기본값 `~/.local/state`)
   2. `tmr`에서만, codex 프로세스가 열어 둔 rollout 파일. `lsof`로 찾는다.
-  3. oh-my-codex가 pane 디렉터리나 그 상위 디렉터리(홈 디렉터리까지)에 쓰는
+  3. triflux `tfx-live start`와 `tfx-live adopt`가 pane이나 세션에 거는 tmux 옵션
+     `@tfx_codex_thread`. 공유 app-server daemon에 붙은 Codex TUI는 rollout을 열어
+     두지 않고 훅도 daemon 안에서 실행하므로 이 옵션이 유일한 기록인 경우가 많다.
+  4. oh-my-codex가 pane 디렉터리나 그 상위 디렉터리(홈 디렉터리까지)에 쓰는
      `.omx/state/session.json`
 - Antigravity는 `agy` 명령으로 알아보며, 이름을 가져올 곳은 없다.
 

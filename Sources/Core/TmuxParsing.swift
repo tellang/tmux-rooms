@@ -65,9 +65,9 @@ enum TmuxParser {
                 clients.append(.init(name:f[0],tty:tty,pid:pid,created:created,sessionID:f[4],activity:activity,flags:flags,readOnly:readOnly,termName:f[8],control:control))
             case 80:
                 phase=2
-                guard f.count == 11,validID(f[0],prefix:"$"),validID(f[1],prefix:"@"),validID(f[2],prefix:"%"),let pid=int32(f[3]),let active=bool(f[7]),let dead=bool(f[8]),let windowIndex=nonnegativeInt(f[9]),let paneIndex=nonnegativeInt(f[10]) else { throw bad("pane") }
+                guard f.count == 12,validID(f[0],prefix:"$"),validID(f[1],prefix:"@"),validID(f[2],prefix:"%"),let pid=int32(f[3]),let active=bool(f[7]),let dead=bool(f[8]),let windowIndex=nonnegativeInt(f[9]),let paneIndex=nonnegativeInt(f[10]) else { throw bad("pane") }
                 guard paneKeys.insert("\(f[0])\u{0}\(f[2])").inserted else { throw bad("duplicate pane") }
-                panes.append(.init(sessionID:f[0],windowID:f[1],paneID:f[2],pid:pid,path:f[4],title:f[5],command:f[6],active:active,dead:dead,windowIndex:windowIndex,paneIndex:paneIndex))
+                panes.append(.init(sessionID:f[0],windowID:f[1],paneID:f[2],pid:pid,path:f[4],title:f[5],command:f[6],active:active,dead:dead,windowIndex:windowIndex,paneIndex:paneIndex,codexThreadID:f[11]))
             default:throw bad("record")
             }
         }
@@ -90,7 +90,7 @@ enum TmuxParser {
 struct RawTmuxBoundary:Sendable,Hashable{let socketPath:String;let serverPID:Int32;let startedAtUnixSeconds:Int64}
 struct RawTmuxSession:Sendable,Hashable{let id:String;let created:Int64;let name:String;let activity:Int64;let attached:Int}
 struct RawTmuxClient:Sendable,Hashable{let name:String;let tty:String?;let pid:Int32;let created:Int64;let sessionID:String;let activity:Int64;let flags:[String];let readOnly:Bool;let termName:String;let control:Bool}
-struct RawTmuxPane:Sendable,Hashable{let sessionID:String;let windowID:String;let paneID:String;let pid:Int32;let path:String;let title:String;let command:String;let active:Bool;let dead:Bool;let windowIndex:Int;let paneIndex:Int}
+struct RawTmuxPane:Sendable,Hashable{let sessionID:String;let windowID:String;let paneID:String;let pid:Int32;let path:String;let title:String;let command:String;let active:Bool;let dead:Bool;let windowIndex:Int;let paneIndex:Int;let codexThreadID:String}
 struct RawTmuxSnapshot:Sendable,Hashable{
     let boundary:RawTmuxBoundary;let sessions:[RawTmuxSession];let clients:[RawTmuxClient];let panes:[RawTmuxPane]
     func bind(server:ServerIdentity)throws->RoomSnapshot{
@@ -100,7 +100,7 @@ struct RawTmuxSnapshot:Sendable,Hashable{
         for pane in panes{panesBySession[pane.sessionID,default:[]].append(pane)}
         let rooms=sessions.sorted{numericID($0.id)<numericID($1.id)}.map{session in
             let publicClients=(clientsBySession[session.id] ?? []).map{client in SessionRoom.Client(key:.init(server:server,clientName:client.name,tty:client.tty,clientPID:client.pid,createdAtUnixSeconds:client.created),lastActivityAtUnixSeconds:client.activity,flags:client.flags,isReadOnly:client.readOnly,terminalName:client.termName,isControlMode:client.control)}
-            let publicPanes=(panesBySession[session.id] ?? []).map{pane in SessionRoom.Pane(windowID:pane.windowID,paneID:pane.paneID,panePID:pane.pid,currentPath:pane.path,title:pane.title,currentCommand:pane.command,isActive:pane.active,isDead:pane.dead,windowIndex:pane.windowIndex,paneIndex:pane.paneIndex)}
+            let publicPanes=(panesBySession[session.id] ?? []).map{pane in SessionRoom.Pane(windowID:pane.windowID,paneID:pane.paneID,panePID:pane.pid,currentPath:pane.path,title:pane.title,currentCommand:pane.command,isActive:pane.active,isDead:pane.dead,windowIndex:pane.windowIndex,paneIndex:pane.paneIndex,codexThreadID:pane.codexThreadID)}
             return SessionRoom(token:.init(server:server,sessionID:session.id,createdAtUnixSeconds:session.created),name:session.name,lastActivityAtUnixSeconds:session.activity,panes:publicPanes,clients:publicClients)
         }
         return RoomSnapshot(server:server,rooms:rooms)
@@ -110,6 +110,6 @@ struct RawTmuxSnapshot:Sendable,Hashable{
 private extension Character{var isASCIIWholeNumber:Bool{unicodeScalars.count==1&&unicodeScalars.first!.value>=48&&unicodeScalars.first!.value<=57}}
 private struct Cursor{
     let bytes:[UInt8];var index=0;var isAtEnd:Bool{index==bytes.count};init(_ data:Data){bytes=Array(data)}
-    mutating func record()throws->(UInt8,[String]){guard index<bytes.count else{throw TmuxFailure.malformedOutput("truncated")};let type=bytes[index];index+=1;let count:Int;switch type{case 66,69,83:count=5;case 67:count=10;case 80:count=11;default:throw TmuxFailure.malformedOutput("unknown type")};var fields:[String]=[];for _ in 0..<count{fields.append(try field())};guard index<bytes.count,bytes[index]==10 else{throw TmuxFailure.malformedOutput("missing LF")};index+=1;return(type,fields)}
+    mutating func record()throws->(UInt8,[String]){guard index<bytes.count else{throw TmuxFailure.malformedOutput("truncated")};let type=bytes[index];index+=1;let count:Int;switch type{case 66,69,83:count=5;case 67:count=10;case 80:count=12;default:throw TmuxFailure.malformedOutput("unknown type")};var fields:[String]=[];for _ in 0..<count{fields.append(try field())};guard index<bytes.count,bytes[index]==10 else{throw TmuxFailure.malformedOutput("missing LF")};index+=1;return(type,fields)}
     mutating func field()throws->String{let start=index;while index<bytes.count,bytes[index]>=48,bytes[index]<=57{index+=1};guard index>start,index<bytes.count,bytes[index]==58 else{throw TmuxFailure.malformedOutput("length")};guard index-start==1||bytes[start] != 48,let length=Int(String(decoding:bytes[start..<index],as:UTF8.self)),length<=TmuxParser.fieldLimit else{throw TmuxFailure.malformedOutput("length")};index+=1;guard index<=bytes.count-length else{throw TmuxFailure.malformedOutput("truncated field")};let raw=bytes[index..<index+length];index+=length;guard !raw.contains(0),let string=String(bytes:raw,encoding:.utf8) else{throw TmuxFailure.malformedOutput("utf8")};return string}
 }

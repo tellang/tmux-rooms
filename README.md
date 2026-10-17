@@ -185,7 +185,11 @@ When none of them has a name, the room is labelled `Claude`, `Codex`, or
   running, Tmux Rooms checks the registry the triflux launcher writes at
   `$XDG_STATE_HOME/triflux/codex-sessions/<pid>.json` (`~/.local/state` by
   default). `tmr` then checks the rollout file the codex process has open,
-  found with `lsof`. Last comes `.omx/state/session.json`, which oh-my-codex
+  found with `lsof`. Next is the `@tfx_codex_thread` tmux option that triflux
+  `tfx-live start` and `tfx-live adopt` set on the pane or its session. A
+  Codex TUI on the shared app-server daemon holds no rollout open and runs its
+  hooks inside the daemon, so this option is often its only record. Last comes
+  `.omx/state/session.json`, which oh-my-codex
   writes in the pane's directory or one of its parents up to your home
   directory.
 - Antigravity is recognised by its `agy` command and has no name source.

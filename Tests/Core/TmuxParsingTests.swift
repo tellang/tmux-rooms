@@ -17,7 +17,7 @@ private func parseVerified(_ data: Data) throws -> RoomSnapshot {
 }
 private let session = ["$0", "1700000001", "room\n:🧪B0:", "1700000002", "1"]
 private let client = ["client:one", "/dev/ttys001", "456", "1700000003", "$0", "1700000004", "attached,read-only,x-z", "1", "xterm-256color", "0"]
-private let pane = ["$0", "@0", "%0", "789", "/tmp/a\nb", "title:E1:", "zsh", "1", "0", "12", "3"]
+private let pane = ["$0", "@0", "%0", "789", "/tmp/a\nb", "title:E1:", "zsh", "1", "0", "12", "3", "01a147e6-7b45-76f0-9aed-71e6a3fa8be0"]
 private func validData(clientFields: [String] = client, sessionFields: [String] = session, paneFields: [String] = pane) -> Data {
     record("B", boundary) + record("S", sessionFields) + record("C", clientFields) + record("P", paneFields) + record("E", boundary)
 }
@@ -29,6 +29,7 @@ func framingRoundTrip() throws {
     #expect(snapshot.rooms.first?.panes.first?.title == "title:E1:")
     #expect(snapshot.rooms.first?.panes.first?.windowIndex == 12)
     #expect(snapshot.rooms.first?.panes.first?.paneIndex == 3)
+    #expect(snapshot.rooms.first?.panes.first?.codexThreadID == "01a147e6-7b45-76f0-9aed-71e6a3fa8be0")
     #expect(snapshot.rooms.first?.clients.first?.flags == ["attached", "read-only", "x-z"])
 }
 
@@ -156,7 +157,7 @@ func largeInventoryIsBounded() throws {
     let count = 10_001
     var data = record("B", boundary)
     for index in 0..<count { data += record("S", ["$\(index)", "1700000001", "r\(index)", "1700000002", "0"]) }
-    for index in 0..<count { data += record("P", ["$\(index)", "@\(index)", "%\(index)", "789", "/tmp", "t", "zsh", "1", "0", "\(index)", "0"]) }
+    for index in 0..<count { data += record("P", ["$\(index)", "@\(index)", "%\(index)", "789", "/tmp", "t", "zsh", "1", "0", "\(index)", "0", ""]) }
     data += record("E", boundary)
     let start = ContinuousClock.now
     let snapshot = try parseVerified(data)

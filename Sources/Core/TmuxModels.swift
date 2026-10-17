@@ -36,10 +36,12 @@ public struct SessionRoom: Sendable, Hashable {
         public let windowIndex: Int; public let paneIndex: Int
         public let currentPath: String; public let title: String; public let currentCommand: String
         public let isActive: Bool; public let isDead: Bool
-        public init(windowID: String, paneID: String, panePID: Int32, currentPath: String, title: String, currentCommand: String, isActive: Bool, isDead: Bool, windowIndex: Int, paneIndex: Int) {
+        /// The Codex thread triflux `tfx-live start` or `adopt` recorded on the pane, empty when none.
+        public let codexThreadID: String
+        public init(windowID: String, paneID: String, panePID: Int32, currentPath: String, title: String, currentCommand: String, isActive: Bool, isDead: Bool, windowIndex: Int, paneIndex: Int, codexThreadID: String = "") {
             self.windowID = windowID; self.paneID = paneID; self.panePID = panePID; self.currentPath = currentPath
             self.title = title; self.currentCommand = currentCommand; self.isActive = isActive; self.isDead = isDead
-            self.windowIndex = windowIndex; self.paneIndex = paneIndex
+            self.windowIndex = windowIndex; self.paneIndex = paneIndex; self.codexThreadID = codexThreadID
         }
     }
     public struct Client: Sendable, Hashable {
