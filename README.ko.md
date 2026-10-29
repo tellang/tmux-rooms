@@ -162,7 +162,7 @@ Claude의 상태는 Claude의 세션 레지스트리에서 읽는다. Codex는 p
 
 ## 에이전트 이름을 가져오는 곳
 
-Tmux Rooms는 아래 파일과, Claude Code의 경우 tmux pane 제목을 읽기만 한다.
+Tmux Rooms는 아래 파일과, Claude Code 및 Antigravity의 경우 tmux pane 제목을 읽기만 한다.
 어디에도 이름이 없으면 방은 `Claude`, `Codex`, `Antigravity`로 표시된다. 에이전트가 없는 방은 tmux 이름을 그대로 쓴다.
 
 - Claude Code는 `~/.claude/sessions/<pid>.json`을 남긴다(`CLAUDE_CONFIG_DIR`가
@@ -183,7 +183,14 @@ Tmux Rooms는 아래 파일과, Claude Code의 경우 tmux pane 제목을 읽기
      두지 않고 훅도 daemon 안에서 실행하므로 이 옵션이 유일한 기록인 경우가 많다.
   4. oh-my-codex가 pane 디렉터리나 그 상위 디렉터리(홈 디렉터리까지)에 쓰는
      `.omx/state/session.json`
-- Antigravity는 `agy` 명령으로 알아보며, 이름을 가져올 곳은 없다.
+- Antigravity 대화 제목은 `$AGY_HOME/conversation_summaries.db`에서 가져온다(기본값
+  `~/.gemini/antigravity-cli`). 어떤 pane이 어떤 대화를 돌리는지는 다음 순서로 찾는다.
+  1. `tmr`에서만, `agy` 프로세스가 열어 둔 `presence/<conversation-id>.lock` 파일.
+     `lsof`로 찾아 `conversation_summaries.db`의 제목과 연결한다.
+  2. triflux `tfx-live start`가 세션에 거는 tmux 옵션 `@tfx_agy_name`. 첫 프롬프트
+     전이라 대화가 아직 생기지 않았을 때와 메뉴바 새로고침에서 이 이름을 쓴다.
+  3. Antigravity가 pane에 써 둔 터미널 제목. 빈 제목, `Antigravity`,
+     `Antigravity CLI`, `agy` 명령줄, 호스트 이름은 쓰지 않는다.
 
 기록은 두 조건을 모두 만족할 때만 인정한다. 기록의 pane이 살아 있는 pane과 같아야
 한다. pid는 그 pane의 프로세스이거나 같은 에이전트를 돌리는 하위 프로세스여야 한다. 끝난 세션이 남긴 파일로는 방

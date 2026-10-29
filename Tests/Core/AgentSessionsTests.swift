@@ -270,7 +270,7 @@ func resolverStripsStatusGlyphFromPaneTitle() {
 func resolverIgnoresDefaultPaneTitles() {
     let host = PaneTitle.localHostName
     let short = host.split(separator: ".").first.map(String.init) ?? host
-    for title in ["", "   ", "✳", "✳ ", "Claude", "claude", "✳ Claude Code", "⠂ Claude Code", "✳\u{FE0F} Claude Code", "claude agents", "✳ claude --resume", host, short] {
+    for title in ["", "   ", "✳", "✳ ", "Claude", "claude", "✳ Claude Code", "⠂ Claude Code", "✳\u{FE0F} Claude Code", "claude agents", "✳ claude --resume", "Antigravity", "antigravity", "Antigravity CLI", "agy", "agy --resume", host, short] {
         let subject = room(panes: [pane("%1", pid: 500, title: title)])
         let presence = AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "500 1 claude"))
         #expect(presence == .detected(.claude), "\(title)")
@@ -285,6 +285,9 @@ func paneTitleRejectsHostName() {
     #expect(PaneTitle.agentName(from: "Mac-Studio 작업", hostName: "Mac-Studio.local") == "Mac-Studio 작업")
     #expect(PaneTitle.agentName(from: "✳ Claude Code", hostName: "") == nil)
     #expect(PaneTitle.agentName(from: "Claude API 정리", hostName: "") == "Claude API 정리")
+    #expect(PaneTitle.agentName(from: "Antigravity", hostName: "") == nil)
+    #expect(PaneTitle.agentName(from: "agy --resume", hostName: "") == nil)
+    #expect(PaneTitle.agentName(from: "Antigravity 설정", hostName: "") == "Antigravity 설정")
     #expect(PaneTitle.agentName(from: "작업\u{1B}]0;x\u{07}", hostName: "") == "작업]0;x")
 }
 
@@ -305,10 +308,12 @@ func resolverKeepsDerivedRecordBehaviour() {
     #expect(presence == .detected(.claude))
 }
 
-@Test("only Claude's pane title is read; other agents keep their label")
-func resolverReadsPaneTitleOnlyForClaude() {
-    let subject = room(panes: [pane("%7", pid: 500, command: "codex", title: "some title")])
-    #expect(AgentPresenceResolver.presence(for: subject, records: [], table: ProcessTable(psOutput: "500 4382 codex")) == .detected(.codex))
+@Test("Claude and Antigravity read the pane title; Codex keeps its label")
+func resolverReadsPaneTitleOnlyForClaudeAndAgy() {
+    let codexRoom = room(panes: [pane("%7", pid: 500, command: "codex", title: "some title")])
+    #expect(AgentPresenceResolver.presence(for: codexRoom, records: [], table: ProcessTable(psOutput: "500 4382 codex")) == .detected(.codex))
+    let agyRoom = room(panes: [pane("%8", pid: 700, command: "agy", title: "10.29 안티 테스트")])
+    #expect(AgentPresenceResolver.presence(for: agyRoom, records: [], table: ProcessTable(psOutput: "700 4382 agy")) == .named(.agy, "10.29 안티 테스트"))
 }
 
 @Test("a shell pane's title never names a room")

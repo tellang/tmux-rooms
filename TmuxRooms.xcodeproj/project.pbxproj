@@ -11,6 +11,7 @@
 		04FD1BCB5753FD623CCCC247 /* TmuxModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE3345A8B4E57CCFADA0784 /* TmuxModels.swift */; };
 		0634EBE2AE94B7DC0DBD5D1A /* ITermManagedAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96AB9DF44F7F67FAB2736588 /* ITermManagedAutomation.swift */; };
 		0996120AA49E1FE1EE37EF1D /* RoomFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF74323DD3D8CA6FE5D3866F /* RoomFixtures.swift */; };
+		0A4F66690413D348D326B158 /* AgySessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53435EA2DEB039030F7FDC20 /* AgySessions.swift */; };
 		0BC35BC5FDB765982C68ACD6 /* ManagedMutationRaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E94995A5859660C23083845 /* ManagedMutationRaceTests.swift */; };
 		103FAF219559303A4475D955 /* AgentPresenceTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B6D140FB9D6831E86B0002 /* AgentPresenceTrackerTests.swift */; };
 		122D689AB7D61760D8B9816E /* TerminalTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27FBCB51B2CA45180E9DF832 /* TerminalTextTests.swift */; };
@@ -163,6 +164,7 @@
 		4A0979D7D8DB9816EE1E02D5 /* ProcessLiveness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessLiveness.swift; sourceTree = "<group>"; };
 		4D60E687E5F5644FD6CB52FE /* ClaudeConversationTitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeConversationTitles.swift; sourceTree = "<group>"; };
 		4EE5667D17331FDBB59477D4 /* RefreshCadence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshCadence.swift; sourceTree = "<group>"; };
+		53435EA2DEB039030F7FDC20 /* AgySessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgySessions.swift; sourceTree = "<group>"; };
 		544B9EBF86A6A4B9DFAC58DD /* BoundedFileReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedFileReader.swift; sourceTree = "<group>"; };
 		571AC7EC2862FCD88C60CE2E /* ITermAutomationSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITermAutomationSmokeTests.swift; sourceTree = "<group>"; };
 		5DDAC08147188701647446F2 /* TmuxRoomsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxRoomsUITests.swift; sourceTree = "<group>"; };
@@ -410,6 +412,7 @@
 				87CE3F9C1BAF0228B5C32084 /* AgentPresenceProbe.swift */,
 				220B73B11BA5E06C86B3969C /* AgentPresenceTracker.swift */,
 				64C551C43ADD362890DEF95E /* AgentSessions.swift */,
+				53435EA2DEB039030F7FDC20 /* AgySessions.swift */,
 				A6B66239C51A482B06F35A9D /* AppLog.swift */,
 				544B9EBF86A6A4B9DFAC58DD /* BoundedFileReader.swift */,
 				4D60E687E5F5644FD6CB52FE /* ClaudeConversationTitles.swift */,
@@ -702,6 +705,7 @@
 				22D25942563710AFAF8A816B /* AgentPresenceProbe.swift in Sources */,
 				8CA1856504F2C272060B32B5 /* AgentPresenceTracker.swift in Sources */,
 				2934B6E8F5260BDAEB6F47B5 /* AgentSessions.swift in Sources */,
+				0A4F66690413D348D326B158 /* AgySessions.swift in Sources */,
 				8EB6CF408C3DC086904658C0 /* AppLog.swift in Sources */,
 				5F8151DDCB95574D035C45B8 /* AppleScriptRunner.swift in Sources */,
 				F7EA70AAABA2D740626616D9 /* BoundedFileReader.swift in Sources */,

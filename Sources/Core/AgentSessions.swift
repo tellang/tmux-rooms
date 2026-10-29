@@ -295,24 +295,30 @@ public struct ProcessTable: Sendable, Hashable {
     }
 }
 
-/// Reads the name Claude Code wrote into its pane's title.
+/// Reads the name Claude Code or Antigravity wrote into its pane's title.
 ///
 /// A background session shown through `claude agents` keeps a registry record
 /// with no tmux coordinate, so the pane it is viewed in has no record to match.
-/// Claude Code still titles that terminal with the conversation's name, behind
-/// a status glyph: `✳` when idle, a Braille spinner while working.
+/// Claude Code and Antigravity still title that terminal with the conversation's
+/// name, behind a status glyph: `✳` when idle, a Braille spinner while working.
 public enum PaneTitle {
     /// The usable name in `title`, or `nil` when it is only a default: empty,
-    /// Claude Code's own placeholder, a `claude` command line a shell put
-    /// there, or the host name tmux gives a new pane.
+    /// the agent's own placeholder, a command line a shell put there, or the
+    /// host name tmux gives a new pane.
     public static func agentName(from title: String, hostName: String = localHostName) -> String? {
         let scalars = TerminalText.sanitized(title).unicodeScalars.drop(while: isLeadingMarker)
         let name = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
         let folded = name.lowercased()
         // A shell shows the command as typed, in lowercase; a conversation
-        // title such as "Claude API 정리" is left alone.
-        guard folded != "claude", folded != "claude code", !name.hasPrefix("claude ") else { return nil }
+        // title such as "Claude API 정리" or "Antigravity 설정" is left alone.
+        guard folded != "claude",
+              folded != "claude code",
+              !name.hasPrefix("claude "),
+              folded != "antigravity",
+              folded != "antigravity cli",
+              folded != "agy",
+              !name.hasPrefix("agy ") else { return nil }
         let host = hostName.lowercased()
         if !host.isEmpty, folded == host || folded == host.split(separator: ".").first.map(String.init) { return nil }
         return name
@@ -400,7 +406,7 @@ public enum AgentPresenceResolver {
                                  state: record.state)
         }
         let found = tree.flatMap { table?.agent(among: $0) }
-        let name = found?.kind == .claude ? PaneTitle.agentName(from: pane.title) : nil
+        let name = (found?.kind == .claude || found?.kind == .agy) ? PaneTitle.agentName(from: pane.title) : nil
         return PaneAgentInfo(kind: found?.kind, pid: found?.pid ?? pane.panePID, name: name)
     }
 

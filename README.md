@@ -168,9 +168,9 @@ read for `ls --json`, and state is never guessed from a process name.
 
 ## Where agent names come from
 
-Tmux Rooms only reads these files, plus the tmux pane title for Claude Code.
-When none of them has a name, the room is labelled `Claude`, `Codex`, or
-`Antigravity`, and a room with no agent keeps its tmux name.
+Tmux Rooms only reads these files, plus the tmux pane title for Claude Code and
+Antigravity. When none of them has a name, the room is labelled `Claude`,
+`Codex`, or `Antigravity`, and a room with no agent keeps its tmux name.
 
 - Claude Code keeps `~/.claude/sessions/<pid>.json` (under `$CLAUDE_CONFIG_DIR`
   when that is set), which records the name set with `/rename` and the pane
@@ -192,7 +192,15 @@ When none of them has a name, the room is labelled `Claude`, `Codex`, or
   `.omx/state/session.json`, which oh-my-codex
   writes in the pane's directory or one of its parents up to your home
   directory.
-- Antigravity is recognised by its `agy` command and has no name source.
+- Antigravity conversation titles come from
+  `$AGY_HOME/conversation_summaries.db` (`~/.gemini/antigravity-cli` by
+  default). `tmr` matches a pane to its conversation by checking the
+  `presence/<conversation-id>.lock` file the `agy` process has open, found
+  with `lsof`. Next is the `@tfx_agy_name` tmux option that triflux
+  `tfx-live start` sets on the session while an `agy` pane has not yet started
+  a conversation. Last is the tmux pane title Antigravity wrote into the
+  terminal, ignoring empty titles, `Antigravity`, `Antigravity CLI`, `agy`
+  command lines, and the host name.
 
 A record counts only when its pane matches a live pane and its pid is the
 pane's process, or a descendant running that same agent. A file left behind by

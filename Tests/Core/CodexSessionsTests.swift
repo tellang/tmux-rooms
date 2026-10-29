@@ -117,3 +117,31 @@ func codexOMXRejectsStalePID() {
     let table = ProcessTable(psOutput: "100 1 node\n102 100 codex\n999 100 zsh")
     #expect(CodexOMXSession.record(fromJSON: json, paneID: "%228", nativePID: 102, currentPath: "/fixture", names: ["stale":"Old thread"], panePID: 100, table: table) == nil)
 }
+
+@Test("Antigravity summary store and presence lock selection")
+func agySummaryStoreAndPresenceSelection() throws {
+    let home = URL(fileURLWithPath: "/fixture/home")
+    #expect(AgySummaryStore.defaultHome(environment: [:], homeDirectory: home).path == "/fixture/home/.gemini/antigravity-cli")
+    #expect(AgySummaryStore.defaultHome(environment: ["AGY_HOME": "/fixture/agy"], homeDirectory: home).path == "/fixture/agy")
+    #expect(AgySummaryStore.optionName("  10.29\u{1B}]0;x\u{07} 안티 ") == "10.29]0;x 안티")
+    #expect(AgySummaryStore.optionName("   ") == nil)
+
+    let root = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "agy-store-\(UUID().uuidString)")
+    let presence = root.appending(path: "presence")
+    try FileManager.default.createDirectory(at: presence, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let idOld = "6d843c4d-0ca4-4d04-8374-a66270e5e9dc"
+    let idNew = "78fb77dd-8b6e-4820-976a-43e15b916ba8"
+    let lockOld = presence.appending(path: "\(idOld).lock")
+    let lockNew = presence.appending(path: "\(idNew).lock")
+    let notUUID = presence.appending(path: "not-a-uuid.lock")
+    try Data().write(to: lockOld)
+    try Data().write(to: lockNew)
+    try Data().write(to: notUUID)
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: lockOld.path)
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 2)], ofItemAtPath: lockNew.path)
+
+    let lsof = [lockOld.path, lockNew.path, notUUID.path, "/tmp/\(idOld).lock"].map { "n" + $0 }.joined(separator: "\n")
+    #expect(AgyPresenceSession.conversationID(lsofOutput: lsof, agyHome: root) == idNew)
+}

@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import TmuxRoomsCore
 
@@ -36,6 +37,7 @@ private actor AgentFixtureRunner: TmuxCommandRunning {
 private struct AgentFixture {
     let root = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "tmr-agent-\(UUID().uuidString)")
     var codexHome: URL { root.appending(path: ".codex") }
+    var agyHome: URL { root.appending(path: ".gemini/antigravity-cli") }
     var registry: URL { root.appending(path: "registry") }
     var checkout: URL { root.appending(path: "repo/sub") }
     init() throws { try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true) }
@@ -44,7 +46,7 @@ private struct AgentFixture {
         try Data(text.utf8).write(to: url)
     }
     func probe(_ runner: AgentFixtureRunner, lsof: Bool = false) -> AgentPresenceProbe {
-        AgentPresenceProbe(runner: runner, registryDirectory: root.appending(path: "claude"), projectsDirectory: nil, codexRegistryDirectory: registry, codexHome: codexHome, homeDirectory: root, socketPath: "/fixture/tmux.sock", allowLsofFallback: lsof)
+        AgentPresenceProbe(runner: runner, registryDirectory: root.appending(path: "claude"), projectsDirectory: nil, codexRegistryDirectory: registry, codexHome: codexHome, agyHome: agyHome, homeDirectory: root, socketPath: "/fixture/tmux.sock", allowLsofFallback: lsof)
     }
     var room: SessionRoom { room(panes: [(paneID: "%228", panePID: 100)]) }
     func room(panes: [(paneID: String, panePID: Int32)]) -> SessionRoom {
@@ -219,4 +221,42 @@ func probeBoundsPaneConcurrency() async throws {
     #expect(panes.allSatisfy { result.panes[$0.paneID]?.state == .busy && result.panes[$0.paneID]?.pid == $0.panePID + 1 })
     let most = await runner.mostCapturesInFlight
     #expect(most > 1 && most <= AgentPresenceProbe.paneConcurrency)
+}
+
+@Test("Antigravity resolves conversation title from open presence lock and falls back to @tfx_agy_name")
+func probeAgySummaryDBAndOptionFallback() async throws {
+    let fixture = try AgentFixture(); defer { fixture.remove() }
+    let agyHome = fixture.root.appending(path: ".gemini/antigravity-cli")
+    let presence = agyHome.appending(path: "presence")
+    try FileManager.default.createDirectory(at: presence, withIntermediateDirectories: true)
+
+    let dbURL = agyHome.appending(path: "conversation_summaries.db")
+    var db: OpaquePointer?
+    #expect(sqlite3_open(dbURL.path, &db) == SQLITE_OK)
+    if let db {
+        #expect(sqlite3_exec(db, "CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT ''); INSERT INTO conversation_summaries VALUES ('78fb77dd-8b6e-4820-976a-43e15b916ba8', '10.29 안티 DB 제목'), ('6d843c4d-0ca4-4d04-8374-a66270e5e9dc', '');", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+    }
+
+    let activeID = "78fb77dd-8b6e-4820-976a-43e15b916ba8"
+    let lockURL = presence.appending(path: "\(activeID).lock")
+    try Data("102\n".utf8).write(to: lockURL)
+
+    let base = fixture.room
+    let pane = base.panes[0]
+    let room = SessionRoom(token: base.token, name: base.name, lastActivityAtUnixSeconds: base.lastActivityAtUnixSeconds, panes: [
+        SessionRoom.Pane(windowID: pane.windowID, paneID: pane.paneID, panePID: pane.panePID, currentPath: pane.currentPath, title: pane.title, currentCommand: "agy", isActive: true, isDead: false, windowIndex: 0, paneIndex: 0, agyName: "10.29 안티 옵션 이름"),
+    ], clients: [])
+
+    #expect(AgySummaryStore.titles(in: agyHome)[activeID] == "10.29 안티 DB 제목")
+
+    let cliRunner = AgentFixtureRunner(ps: "100 1 zsh\n102 100 agy", lsof: "n" + lockURL.path)
+    let cliResult = await fixture.probe(cliRunner, lsof: true).inspect(for: [room])
+    #expect(cliResult.presence["$0"] == .named(.agy, "10.29 안티 DB 제목"))
+    #expect(cliResult.panes["%228"]?.sessionID == activeID && cliResult.panes["%228"]?.pid == 102)
+
+    let appRunner = AgentFixtureRunner(ps: "100 1 zsh\n102 100 agy", lsof: "n" + lockURL.path)
+    let appResult = await fixture.probe(appRunner).inspect(for: [room])
+    #expect(appResult.presence["$0"] == .named(.agy, "10.29 안티 옵션 이름"))
+    #expect(await appRunner.invocations.map { $0.executableURL.lastPathComponent } == ["ps"])
 }

@@ -18,6 +18,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
     private let projectsDirectory: URL?
     private let codexRegistryDirectory: URL
     private let codexHome: URL
+    private let agyHome: URL
     private let homeDirectory: URL
     private let psExecutableURL: URL
     private let lsofExecutableURL: URL
@@ -33,6 +34,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
         projectsDirectory: URL? = ClaudeConversationTitles.defaultProjectsDirectory,
         codexRegistryDirectory: URL = CodexSessionRegistry.defaultDirectory(),
         codexHome: URL = CodexSessionIndex.defaultHome(),
+        agyHome: URL? = nil,
         homeDirectory: URL = URL(fileURLWithPath: NSHomeDirectory()),
         tmuxExecutableURL: URL = TmuxExecutable.defaultURL,
         socketPath: String? = nil,
@@ -45,6 +47,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
         self.projectsDirectory = projectsDirectory
         self.codexRegistryDirectory = codexRegistryDirectory
         self.codexHome = codexHome
+        self.agyHome = agyHome ?? AgySummaryStore.defaultHome(homeDirectory: homeDirectory)
         self.homeDirectory = homeDirectory
         self.tmuxExecutableURL = tmuxExecutableURL
         self.socketPath = socketPath
@@ -61,6 +64,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
     public func inspect(for rooms: [SessionRoom], capturePaneState: Bool = false) async -> AgentProbeSnapshot {
         guard !rooms.isEmpty else { return AgentProbeSnapshot(presence: [:], panes: [:]) }
         let names = CodexSessionIndex.names(in: codexHome)
+        let agyTitles = AgySummaryStore.titles(in: agyHome)
         let records = ClaudeSessionRegistry.records(in: registryDirectory, projectsDirectory: projectsDirectory)
             + CodexSessionRegistry.records(in: codexRegistryDirectory, names: names)
         let table = await processTable()
@@ -74,7 +78,7 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
                 guard next < live.count else { return }
                 let pane = live[next]
                 next += 1
-                group.addTask { (pane.paneID, await inspect(pane, records: records, table: table, names: names, capturePaneState: capturePaneState)) }
+                group.addTask { (pane.paneID, await inspect(pane, records: records, table: table, names: names, agyTitles: agyTitles, capturePaneState: capturePaneState)) }
             }
             for _ in 0..<Self.paneConcurrency { enqueue() }
             for await (paneID, info) in group {
@@ -91,14 +95,24 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
     }
 
     /// One pane's agent. The process tree is walked once and shared by the
-    /// record match, the Codex fallbacks, and the final answer.
-    private func inspect(_ pane: SessionRoom.Pane, records: [AgentSessionRecord], table: ProcessTable?, names: [String: String], capturePaneState: Bool) async -> PaneAgentInfo {
+    /// record match, the Codex and Antigravity fallbacks, and the final answer.
+    private func inspect(_ pane: SessionRoom.Pane, records: [AgentSessionRecord], table: ProcessTable?, names: [String: String], agyTitles: [String: String], capturePaneState: Bool) async -> PaneAgentInfo {
         let tree = table?.tree(of: pane.panePID)
         var records = records
-        if let table, let tree, let found = table.agent(among: tree), found.kind == .codex,
-           AgentPresenceResolver.matchingRecord(for: pane, records: records, table: table, tree: tree) == nil,
-           let record = await codexFallbackRecord(for: pane, nativePID: found.pid, names: names, table: table) {
-            records.append(record)
+        if let table, let tree, let found = table.agent(among: tree),
+           AgentPresenceResolver.matchingRecord(for: pane, records: records, table: table, tree: tree) == nil {
+            switch found.kind {
+            case .codex:
+                if let record = await codexFallbackRecord(for: pane, nativePID: found.pid, names: names, table: table) {
+                    records.append(record)
+                }
+            case .agy:
+                if let record = await agyFallbackRecord(for: pane, nativePID: found.pid, titles: agyTitles) {
+                    records.append(record)
+                }
+            case .claude:
+                break
+            }
         }
         let info = AgentPresenceResolver.agent(for: pane, records: records, table: table, tree: tree)
         guard capturePaneState, let kind = info.kind, kind == .codex || kind == .agy else { return info }
@@ -124,6 +138,26 @@ public struct AgentPresenceProbe: AgentPresenceProbing, Sendable {
               let id = CodexRolloutSession.sessionID(lsofOutput: output, codexHome: codexHome),
               let name = names[id] else { return nil }
         return AgentSessionRecord(kind: .codex, pid: nativePID, sessionID: id, name: name, nameIsDerived: false, paneID: pane.paneID, tmuxSessionName: nil, currentPath: pane.currentPath)
+    }
+
+    /// The presence lock the Antigravity process holds open identifies its
+    /// conversation in `conversation_summaries.db`. Before the first prompt or
+    /// during menu-bar refresh, the `@tfx_agy_name` tmux option set by
+    /// `tfx-live start` supplies the pending name.
+    private func agyFallbackRecord(for pane: SessionRoom.Pane, nativePID: Int32, titles: [String: String]) async -> AgentSessionRecord? {
+        let sessionID = allowLsofFallback ? await agyConversationID(nativePID: nativePID) : nil
+        if let sessionID, let name = titles[sessionID] {
+            return AgentSessionRecord(kind: .agy, pid: nativePID, sessionID: sessionID, name: name, nameIsDerived: false, paneID: pane.paneID, tmuxSessionName: nil, currentPath: pane.currentPath)
+        }
+        if let name = AgySummaryStore.optionName(pane.agyName) {
+            return AgentSessionRecord(kind: .agy, pid: nativePID, sessionID: sessionID ?? "", name: name, nameIsDerived: false, paneID: pane.paneID, tmuxSessionName: nil, currentPath: pane.currentPath)
+        }
+        return nil
+    }
+
+    private func agyConversationID(nativePID: Int32) async -> String? {
+        guard let output = await output(of: lsofExecutableURL, ["-p", String(nativePID), "-Fn"]) else { return nil }
+        return AgyPresenceSession.conversationID(lsofOutput: output, agyHome: agyHome)
     }
 
     private func screenState(paneID: String, kind: AgentKind) async -> AgentActivityState {
