@@ -15,6 +15,7 @@ struct Options {
     var here = false
     var json = false
     var readOnly = false
+    var delete = false
     var text: String?
 }
 
@@ -26,6 +27,7 @@ func parseOptions(_ arguments: [String]) -> Options? {
         case "--here": options.here = true
         case "--json": options.json = true
         case "-r", "--read-only": options.readOnly = true
+        case "-d", "--delete": options.delete = true
         default:
             if argument.hasPrefix("-") { return nil }
             words.append(argument)
@@ -76,13 +78,22 @@ func emptyMessage(options: Options, directory: String, home: String) -> String {
     return message
 }
 
+enum ChosenAction {
+    case attach(CLIRoom)
+    case delete(CLIRoom)
+}
+
 func choose(
-    from rooms: [CLIRoom], home: String, directory: String, program: String, readOnly: Bool
-) -> CLIRoom {
+    from rooms: [CLIRoom], home: String, directory: String, program: String, readOnly: Bool, deleteMode: Bool
+) -> ChosenAction {
     let initial = RoomQuery.initialCursor(rooms, directory: directory)
-    switch RoomChooser.run(rooms: rooms, home: home, initial: initial, program: program, readOnly: readOnly) {
+    switch RoomChooser.run(
+        rooms: rooms, home: home, initial: initial, program: program, readOnly: readOnly, deleteMode: deleteMode
+    ) {
     case .picked(let room):
-        return room
+        return .attach(room)
+    case .delete(let room):
+        return .delete(room)
     case .cancelled:
         exit(1)
     case .unavailable:
@@ -92,6 +103,26 @@ func choose(
         }
         writeError(lines.joined(separator: "\n"))
         fail("several rooms match and there is no terminal to choose in; narrow with <text> or --here", code: 1)
+    }
+}
+
+func deleteRoom(_ room: CLIRoom) async -> Never {
+    guard let token = room.token else {
+        fail("cannot delete \(room.tmuxName)", code: 1)
+    }
+    let result = await TmuxDeleteExecutor(snapshotLoader: TmuxSnapshotLoader()).delete(token)
+    switch result {
+    case .succeeded:
+        writeError("deleted \(room.tmuxName)")
+        exit(0)
+    case .alreadyGone:
+        fail("\(room.tmuxName) is already gone", code: 1)
+    case .staleTarget:
+        fail("\(room.tmuxName) changed before delete; try again", code: 1)
+    case .cancelled, .terminalFailure:
+        fail("cannot delete \(room.tmuxName)", code: 1)
+    case .tmuxFailure(let failure):
+        fail(describe(failure), code: 3)
     }
 }
 
@@ -122,6 +153,12 @@ guard let options = parseOptions(arguments) else {
     writeError(HelpText.short(program: program))
     exit(2)
 }
+if command == .list && options.delete {
+    fail("-d cannot be used with ls", code: 2)
+}
+if options.delete && options.readOnly {
+    fail("-d cannot be used with -r", code: 2)
+}
 
 let directory = canonicalCurrentDirectory()
 let scope = options.here ? directory : nil
@@ -148,16 +185,39 @@ case .attach:
     guard !rooms.isEmpty else {
         fail(emptyMessage(options: options, directory: directory, home: home), code: 1)
     }
-    let room = rooms.count == 1
-        ? rooms[0]
-        : choose(from: rooms, home: home, directory: directory, program: program, readOnly: options.readOnly)
-    do {
-        let insideTmux = !(ProcessInfo.processInfo.environment["TMUX"] ?? "").isEmpty
-        let tmuxArguments = try AttachCommand.arguments(
-            sessionID: room.sessionID, readOnly: options.readOnly, insideTmux: insideTmux
+    let action: ChosenAction
+    if rooms.count == 1 {
+        if options.delete {
+            switch RoomChooser.confirmDelete(room: rooms[0]) {
+            case true: action = .delete(rooms[0])
+            case false: exit(1)
+            case nil: fail("cannot confirm delete without a terminal", code: 1)
+            }
+        } else {
+            action = .attach(rooms[0])
+        }
+    } else {
+        action = choose(
+            from: rooms,
+            home: home,
+            directory: directory,
+            program: program,
+            readOnly: options.readOnly,
+            deleteMode: options.delete
         )
-        exec(TmuxExecutable.defaultPath, tmuxArguments)
-    } catch {
-        fail("read-only attach is not available from inside tmux; detach first or drop -r", code: 2)
+    }
+    switch action {
+    case .delete(let room):
+        await deleteRoom(room)
+    case .attach(let room):
+        do {
+            let insideTmux = !(ProcessInfo.processInfo.environment["TMUX"] ?? "").isEmpty
+            let tmuxArguments = try AttachCommand.arguments(
+                sessionID: room.sessionID, readOnly: options.readOnly, insideTmux: insideTmux
+            )
+            exec(TmuxExecutable.defaultPath, tmuxArguments)
+        } catch {
+            fail("read-only attach is not available from inside tmux; detach first or drop -r", code: 2)
+        }
     }
 }

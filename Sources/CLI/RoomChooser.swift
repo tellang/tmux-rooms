@@ -3,6 +3,7 @@ import Foundation
 
 enum ChooserResult {
     case picked(CLIRoom)
+    case delete(CLIRoom)
     case cancelled
     /// stdin or stderr is not a terminal, so nothing can be drawn or read key by key.
     case unavailable
@@ -47,22 +48,26 @@ private final class SingleKeyTerminal {
 enum RoomChooser {
     private static let escape = "\u{1B}"
 
-    /// Draws the room list on stderr and reads keys until a room is picked or the
-    /// chooser is cancelled. stdout stays untouched.
+    /// Draws the room list on stderr and reads keys until a room is picked, deleted,
+    /// or the chooser is cancelled. stdout stays untouched.
     static func run(
         rooms: [CLIRoom],
         home: String,
         initial: Int,
         program: String,
-        readOnly: Bool
+        readOnly: Bool,
+        deleteMode: Bool = false
     ) -> ChooserResult {
         guard let terminal = SingleKeyTerminal() else { return .unavailable }
         let size = terminalSize()
         let visible = max(1, min(rooms.count, size.rows - 3))
         let rows = RoomFormat.chooserRows(rooms, home: home)
         let depth = ColorDepth.detect(environment: ProcessInfo.processInfo.environment)
-        let header = "\(program)  ↑/↓ move  1-9 attach  Enter attach  q quit" + (readOnly ? "  [read-only]" : "")
+        let header = deleteMode
+            ? "\(program)  ↑/↓ move  Enter/d delete  q quit  [delete]"
+            : "\(program)  ↑/↓ move  1-9 attach  Enter attach  d delete  q quit" + (readOnly ? "  [read-only]" : "")
         var state = ChooserState(count: rooms.count, cursor: initial)
+        var pendingDelete: CLIRoom?
 
         write("\(escape)[?25l")
         defer { write("\(escape)[?25h") }
@@ -77,7 +82,12 @@ enum RoomChooser {
                 let fitted = TextWidth.pad(TextWidth.truncate(text, to: size.columns - 1), to: size.columns - 1)
                 lines.append(AgentStyle.paint(fitted, kind: rooms[index].agent, selected: selected, depth: depth))
             }
-            lines.append(dim(TextWidth.truncate(RoomFormat.chooserDetail(rooms[state.cursor]), to: size.columns - 1)))
+            if let room = pendingDelete {
+                let prompt = TextWidth.truncate("Delete \"\(room.title)\" (\(room.tmuxName))? [y/N]", to: size.columns - 1)
+                lines.append("\(escape)[31m\(prompt)\(escape)[0m")
+            } else {
+                lines.append(dim(TextWidth.truncate(RoomFormat.chooserDetail(rooms[state.cursor]), to: size.columns - 1)))
+            }
             for line in lines { frame += "\r\(escape)[2K\(line)\n" }
             write(frame)
             drawn = lines.count
@@ -93,20 +103,51 @@ enum RoomChooser {
                 erase()
                 return .cancelled
             }
+            if let room = pendingDelete {
+                if chunk.first == 0x79 || chunk.first == 0x59 {  // y, Y
+                    erase()
+                    return .delete(room)
+                }
+                if chunk.first == 0x03 || chunk.first == 0x04 {  // Ctrl-C, Ctrl-D
+                    erase()
+                    return .cancelled
+                }
+                pendingDelete = nil
+                redraw()
+                continue
+            }
             for key in ChooserInput.decode(chunk) {
                 switch state.apply(key) {
                 case .none:
                     continue
                 case .select(let index):
-                    erase()
-                    return .picked(rooms[index])
+                    if deleteMode {
+                        pendingDelete = rooms[index]
+                    } else {
+                        erase()
+                        return .picked(rooms[index])
+                    }
+                case .delete(let index):
+                    pendingDelete = rooms[index]
                 case .cancel:
                     erase()
                     return .cancelled
                 }
+                if pendingDelete != nil { break }
             }
             redraw()
         }
+    }
+
+    static func confirmDelete(room: CLIRoom) -> Bool? {
+        guard let terminal = SingleKeyTerminal() else { return nil }
+        write("Delete \"\(room.title)\" (\(room.tmuxName))? [y/N] ")
+        guard let chunk = terminal.readChunk() else {
+            write("\n")
+            return false
+        }
+        write("\n")
+        return chunk.first == 0x79 || chunk.first == 0x59
     }
 
     private static func dim(_ text: String) -> String {

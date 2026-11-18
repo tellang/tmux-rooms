@@ -36,6 +36,8 @@ struct ChooserInputTests {
         #expect(keys("\r") == [.enter])
         #expect(keys("\n") == [.enter])
         #expect(keys("q") == [.cancel])
+        #expect(keys("d") == [.delete])
+        #expect(keys("D") == [.delete])
         #expect(keys("\u{03}") == [.cancel])
         #expect(keys("j") == [.down])
         #expect(keys("k") == [.up])
@@ -74,6 +76,7 @@ struct ChooserStateTests {
     @Test func enterSelectsTheHighlightedRoomAndCancelCancels() {
         var state = ChooserState(count: 4, cursor: 2)
         #expect(state.apply(.enter) == .select(2))
+        #expect(state.apply(.delete) == .delete(2))
         #expect(state.apply(.cancel) == .cancel)
     }
 
@@ -197,7 +200,7 @@ struct HelpTextTests {
     @Test func fullHelpUsesTheProgramNameAndCoversEveryOptionAndKey() {
         let help = HelpText.full(program: "tmr")
         #expect(help.hasPrefix("tmr: "))
-        for needle in ["tmr ls", "--here", "--json", "--read-only", "-help", "Enter", "Home, End", "Esc", "Exit codes", "never creates"] {
+        for needle in ["tmr ls", "--here", "--json", "--read-only", "--delete", "-help", "Enter", "Home, End", "Esc", "Exit codes", "never creates"] {
             #expect(help.lowercased().contains(needle.lowercased()), "missing \(needle)")
         }
         #expect(!help.contains("tmuxrooms"))

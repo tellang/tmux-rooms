@@ -26,6 +26,7 @@ enum HelpText {
           1-9                 Attach to that room at once. With ten or more rooms
                               type both digits, or one digit and Enter.
           Enter               Attach to the highlighted room.
+          d                   Delete the highlighted room (asks for confirmation).
           q, Esc, Ctrl-C      Cancel.
           The highlight starts on the first room with a pane in the current directory.
 
@@ -33,6 +34,7 @@ enum HelpText {
           --here              Only rooms with a pane in the current directory.
           --json              (ls) Print JSON instead of a table.
           -r, --read-only     (attach) Attach read-only.
+          -d, --delete        (attach) Delete the matching room (asks for confirmation).
 
         Agents: rooms running claude, codex, or agy (Antigravity) get that word in the
         AGENT column and a color of its own: claude orange, codex white, agy blue.
@@ -53,13 +55,14 @@ enum HelpText {
           read-only view would need a nested tmux.
           Without a terminal it prints the numbered list to stderr and exits 1.
 
-        Exit codes: 0 success, 1 no match or cancelled, 2 usage, 3 tmux unreadable.
+        Exit codes: 0 success, 1 no match, cancelled, or delete failed, 2 usage, 3 tmux unreadable.
 
         Examples:
           \(program)                    Choose among every room.
           \(program) --here             Choose among the rooms in this directory.
           \(program) billing            Rooms whose title, name, or path mention billing.
           \(program) -r billing         Read-only view of the room that mentions billing.
+          \(program) -d billing         Delete the room that mentions billing.
           \(program) ls --here --json   Machine-readable list for this directory.
         """
     }

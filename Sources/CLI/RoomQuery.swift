@@ -26,6 +26,7 @@ struct CLIRoom: Equatable, Sendable {
     let readOnlyClients: Int
     let lastActivityAtUnixSeconds: Int64
     var panes: [CLIPane] = []
+    var token: SessionToken? = nil
 
     /// `true` when the title is only the tmux name again, so printing both says
     /// nothing new.
@@ -68,7 +69,8 @@ enum RoomQuery {
                 interactiveClients: room.interactiveClients.count,
                 readOnlyClients: room.readOnlyClients.count,
                 lastActivityAtUnixSeconds: room.lastActivityAtUnixSeconds,
-                panes: livePanes
+                panes: livePanes,
+                token: room.token
             )
         }
         .sorted { a, b in

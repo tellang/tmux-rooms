@@ -86,6 +86,8 @@ final class RoomsStore: ObservableObject {
     private var fixtureActiveActions = 0
     private var fixtureGate: CheckedContinuation<Void, Never>?
     private var fixtureGeneration = 0
+    private var isAutomaticRefreshRunning = false
+    private var userActionSequence = 0
 
     init(
         snapshot: RoomSnapshot,
@@ -272,33 +274,51 @@ final class RoomsStore: ObservableObject {
     #endif
 
     private func perform(_ intent: RoomActionIntent) async {
-        guard phase == .idle else {
-            RoomsLog.actions.notice(
-                """
-                action.dropped trace=\(ActionTrace.currentID, privacy: .public) \
-                intent=\(intent.fixtureSummary, privacy: .public) \
-                phase=\(String(describing: self.phase), privacy: .public)
-                """
-            )
-            return
+        let automatic = isAutomaticRefresh(intent)
+        if automatic {
+            guard phase == .idle, !isAutomaticRefreshRunning else { return }
+        } else {
+            guard phase == .idle else {
+                RoomsLog.actions.notice(
+                    """
+                    action.dropped trace=\(ActionTrace.currentID, privacy: .public) \
+                    intent=\(intent.fixtureSummary, privacy: .public) \
+                    phase=\(String(describing: self.phase), privacy: .public)
+                    """
+                )
+                return
+            }
         }
         let issueBeforeRefresh = issue
         let previewBefore = previewTarget
         let trace = ActionTrace.begin()
         defer { trace.finish() }
-        if !isAutomaticRefresh(intent) {
+        if !automatic {
             RoomsLog.actions.notice(
                 "action.requested trace=\(trace.id, privacy: .public) intent=\(intent.fixtureSummary, privacy: .public)"
             )
         }
         let generation = fixtureGeneration
+        let actionSequenceAtStart = userActionSequence
         if isFixture {
             fixtureActionCount += 1
             fixtureLastAction = intent.fixtureSummary
             fixtureActiveActions += 1
             fixtureMaxConcurrentActions = max(fixtureMaxConcurrentActions, fixtureActiveActions)
         }
-        phase = isRefresh(intent) ? .loading : .acting
+        if automatic {
+            isAutomaticRefreshRunning = true
+        } else {
+            userActionSequence &+= 1
+            phase = isRefresh(intent) ? .loading : .acting
+        }
+        defer {
+            if automatic {
+                isAutomaticRefreshRunning = false
+            } else if generation == fixtureGeneration {
+                phase = .idle
+            }
+        }
         if fixtureBlocksActions {
             await withCheckedContinuation { continuation in
                 fixtureGate = continuation
@@ -308,37 +328,42 @@ final class RoomsStore: ObservableObject {
         guard generation == fixtureGeneration else { return }
         let result = await handler.perform(intent)
         guard generation == fixtureGeneration else { return }
+        if automatic && (phase != .idle || userActionSequence != actionSequenceAtStart) {
+            if isFixture { fixtureActiveActions -= 1 }
+            return
+        }
         switch result {
         case let .succeeded(updated, focusableClients, preview):
             if let updated {
-                snapshot = updated
+                if snapshot != updated { snapshot = updated }
                 await refreshAgentPresence(for: updated.rooms, generation: generation)
             }
             if let focusableClients {
-                focusability = Dictionary(uniqueKeysWithValues: focusableClients.map { ($0, .focusable) })
+                let nextFocusability: [ClientKey: ClientFocusability] = Dictionary(uniqueKeysWithValues: focusableClients.map { ($0, .focusable) })
+                if focusability != nextFocusability { focusability = nextFocusability }
             }
             switch preview {
-            case .absent: previewTarget = nil
-            case let .active(token): previewTarget = token
+            case .absent: if previewTarget != nil { previewTarget = nil }
+            case let .active(token): if previewTarget != token { previewTarget = token }
             case nil: break
             }
-            issue = issueAfterSuccessfulRefresh(intent, previous: issueBeforeRefresh)
+            let nextIssue = issueAfterSuccessfulRefresh(intent, previous: issueBeforeRefresh)
+            if issue != nextIssue { issue = nextIssue }
             log(intent, trace: trace, outcome: "succeeded", previewBefore: previewBefore)
         case .unavailable(.clientCannotBeFocused):
             issue = AppIssue(kind: .terminalUnavailable, title: "Client unavailable", message: "The selected client cannot be focused.", diagnostics: nil, retry: .none)
             log(intent, trace: trace, outcome: "unavailable(clientCannotBeFocused)", previewBefore: previewBefore)
         case .failed(let failure):
-            if isAutomaticRefresh(intent),
+            if automatic,
                case .tmux = failure,
                let issueBeforeRefresh {
-                issue = issueBeforeRefresh
+                if issue != issueBeforeRefresh { issue = issueBeforeRefresh }
             } else {
                 issue = Self.issue(for: failure, retrying: intent)
             }
             log(intent, trace: trace, outcome: "failed(\(failure))", previewBefore: previewBefore)
         }
         if isFixture { fixtureActiveActions -= 1 }
-        phase = .idle
     }
 
     /// Relabels the rooms after a snapshot lands. The probe is advisory, so a
@@ -347,7 +372,9 @@ final class RoomsStore: ObservableObject {
         guard let agentTracker else { return }
         guard await agentTracker.refresh(rooms: rooms) else { return }
         guard generation == fixtureGeneration else { return }
-        agentPresence = agentTracker.presence
+        if agentPresence != agentTracker.presence {
+            agentPresence = agentTracker.presence
+        }
     }
 
     /// One line per finished action.

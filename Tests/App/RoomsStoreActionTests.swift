@@ -145,6 +145,24 @@ struct RoomsStoreActionTests {
         #expect(handler.intents.last == .automaticRefresh(revalidateRecovery: true))
     }
 
+    @Test("cadence refresh keeps phase idle and does not overwrite a newer user action issue")
+    func cadenceKeepsPhaseIdleAndDiscardsStaleResult() async throws {
+        let snapshot = appSnapshot(clientCount: 0)
+        let handler = GatedAutoRefreshHandler(snapshot: snapshot)
+        let store = RoomsStore(snapshot: snapshot, isFixture: false, handler: handler)
+
+        store.automaticRefresh()
+        await appEventually { handler.autoRefreshStarted }
+        #expect(store.phase == .idle)
+
+        store.duplicate(snapshot.rooms[0])
+        await appEventually { store.issue?.message == "open failed" && store.phase == .idle }
+
+        handler.resumeAutoRefresh()
+        await appEventually { handler.autoRefreshFinished }
+        #expect(store.issue?.message == "open failed")
+    }
+
     @Test("cadence success clears a prior inventory refresh failure")
     func cadenceClearsInventoryFailure() async throws {
         let snapshot = appSnapshot(clientCount: 0)
@@ -457,6 +475,36 @@ private func appSnapshot(clientCount: Int, roomCount: Int = 1) -> RoomSnapshot {
         )
     }
     return .init(server: server, rooms: rooms)
+}
+
+@MainActor
+private final class GatedAutoRefreshHandler: RoomActionHandling {
+    var previewProgress: (@MainActor (ManagedPreviewState) -> Void)?
+    private let snapshot: RoomSnapshot
+    private var autoRefreshGate: CheckedContinuation<Void, Never>?
+    private(set) var autoRefreshStarted = false
+    private(set) var autoRefreshFinished = false
+
+    init(snapshot: RoomSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func perform(_ intent: RoomActionIntent) async -> AppActionResult {
+        if case .automaticRefresh = intent {
+            autoRefreshStarted = true
+            await withCheckedContinuation { continuation in
+                autoRefreshGate = continuation
+            }
+            autoRefreshFinished = true
+            return .succeeded(snapshot: snapshot, focusableClients: [], preview: nil)
+        }
+        return .failed(.other("open failed"))
+    }
+
+    func resumeAutoRefresh() {
+        autoRefreshGate?.resume()
+        autoRefreshGate = nil
+    }
 }
 
 @MainActor

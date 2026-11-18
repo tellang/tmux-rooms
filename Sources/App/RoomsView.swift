@@ -77,12 +77,6 @@ struct RoomsRootView: View {
                     .foregroundStyle(Palette.muted)
             }
             Spacer(minLength: 8)
-            if store.phase == .loading {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("Refreshing rooms")
-                    .accessibilityIdentifier("refresh.progress")
-            }
             Button {
                 store.refresh()
             } label: {

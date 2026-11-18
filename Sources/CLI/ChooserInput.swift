@@ -1,7 +1,7 @@
 import Foundation
 
 enum ChooserKey: Equatable {
-    case up, down, home, end, enter, cancel
+    case up, down, home, end, enter, delete, cancel
     case digit(Int)
 }
 
@@ -41,6 +41,8 @@ enum ChooserInput {
                 keys.append(.enter)
             case 0x03, 0x04, 0x71, 0x51:  // Ctrl-C, Ctrl-D, q, Q
                 keys.append(.cancel)
+            case 0x64, 0x44:  // d, D
+                keys.append(.delete)
             case 0x10, 0x6B:  // Ctrl-P, k
                 keys.append(.up)
             case 0x0E, 0x6A:  // Ctrl-N, j
@@ -71,6 +73,7 @@ struct ChooserState: Equatable {
     enum Outcome: Equatable {
         case none
         case select(Int)
+        case delete(Int)
         case cancel
     }
 
@@ -104,6 +107,9 @@ struct ChooserState: Equatable {
         case .enter:
             digits = ""
             return .select(cursor)
+        case .delete:
+            digits = ""
+            return .delete(cursor)
         case .cancel:
             return .cancel
         }
